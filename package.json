@@ -1,0 +1,49 @@
+{
+  "name": "lightplayer",
+  "version": "1.0.0",
+  "description": "LightPlayer - modern local video player with realtime captions",
+  "main": "src/main.js",
+  "author": "LightPlayer",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "dist:win": "electron-builder --win nsis portable",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.lightplayer.desktop",
+    "productName": "LightPlayer",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "src/asr_worker.py"
+    ],
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "artifactName": "LightPlayer-${version}-${arch}.${ext}",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "portable": {
+      "artifactName": "LightPlayer-${version}-portable.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  }
+}
