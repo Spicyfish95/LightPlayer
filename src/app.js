@@ -1235,6 +1235,7 @@ $('#popOpenStyle').onclick = () => { $('#subPopover').classList.add('hidden'); o
 
 /* ---------- 字幕弹出菜单（普通工具栏 + 全屏工具栏共用） ---------- */
 // 弹层为 video-wrap 内的 fixed 浮层，打开时按被点击按钮的位置定位（窗口/全屏均适用）
+let subPopAnchor = null;   // 当前弹层的锚点按钮，内容高度变化后据此重新定位
 function positionSubPopover(anchor) {
   const pop = $('#subPopover');
   pop.classList.remove('hidden');
@@ -1253,12 +1254,18 @@ function toggleSubPopover(anchor) {
   hideSpeedMenus();
   $('#fsPlaylist').classList.add('hidden');
   const pop = $('#subPopover');
-  if (pop.classList.contains('hidden')) positionSubPopover(anchor);
-  else pop.classList.add('hidden');
+  if (pop.classList.contains('hidden')) { subPopAnchor = anchor; positionSubPopover(anchor); }
+  else { pop.classList.add('hidden'); subPopAnchor = null; }
 }
 $('#subBtn').onclick = e => { e.stopPropagation(); toggleSubPopover($('#subBtn')); };
 $('#fsSubBtn').onclick = e => { e.stopPropagation(); toggleSubPopover($('#fsSubBtn')); };
 $('#subPopover').onclick = e => e.stopPropagation();
+// 「字幕显示」开关会显隐 .cap-enabled 整块（实时字幕/外挂字幕区），弹层高度随之变化；
+// 尺寸变化后必须按原锚点按钮重新定位，否则变高时底部越出视窗、变矮时悬浮在按钮上方过高处。
+// 普通与全屏工具栏共用同一弹层，此处一并生效；弹层隐藏或无锚点（如左上角菜单内切开关）时不处理。
+new ResizeObserver(() => {
+  if (subPopAnchor && !$('#subPopover').classList.contains('hidden')) positionSubPopover(subPopAnchor);
+}).observe($('#subPopover'));
 
 /* 目录栏显示/隐藏 */
 $('#folderBtn').onclick = () => {

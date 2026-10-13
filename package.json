@@ -35,8 +35,7 @@
           ]
         }
       ],
-      "artifactName": "LightPlayer-${version}-win-${arch}-portable.zip",
-      "signAndEditExecutable": false
+      "artifactName": "LightPlayer-${version}-win-${arch}-portable.zip"
     }
   },
   "devDependencies": {
