@@ -1,0 +1,26 @@
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
+contextBridge.exposeInMainWorld('lightPlayer', {
+  openVideo: () => ipcRenderer.invoke('dialog:open-video'),
+  openVideoFolder: () => ipcRenderer.invoke('dialog:open-video-folder'),
+  openSubtitle: () => ipcRenderer.invoke('dialog:open-subtitle'),
+  openModelDirectory: () => ipcRenderer.invoke('dialog:open-model-directory'),
+  readCaptionCache: video => ipcRenderer.invoke('captions:read-cache', video),
+  clearCaptionCache: video => ipcRenderer.invoke('captions:clear-cache', video),
+  clearAllCaptionCaches: videos => ipcRenderer.invoke('captions:clear-all-caches', videos),
+  exportSrt: payload => ipcRenderer.invoke('captions:export-srt', payload),
+  setHwAccel: enabled => ipcRenderer.invoke('settings:hw-accel', enabled),
+  getHwAccel: () => ipcRenderer.invoke('settings:hw-accel', null),
+  saveSession: payload => ipcRenderer.invoke('session:save', payload),
+  loadSession: () => ipcRenderer.invoke('session:load'),
+  startAsr: options => ipcRenderer.invoke('asr:start', options),
+  stopAsr: () => ipcRenderer.send('asr:stop'),
+  seekAsr: payload => ipcRenderer.send('asr:seek', payload),
+  onAsrEvent: callback => ipcRenderer.on('asr:event', (_, data) => callback(data)),
+  startGpuSetup: () => ipcRenderer.invoke('gpu:setup:start'),
+  cancelGpuSetup: () => ipcRenderer.send('gpu:setup:cancel'),
+  onGpuSetupEvent: callback => ipcRenderer.on('gpu:setup:event', (_, data) => callback(data)),
+  pathForFile: file => { try { return webUtils.getPathForFile(file); } catch (_) { return file && file.path || ''; } },
+  minimize: () => ipcRenderer.send('window:minimize'),
+  maximize: () => ipcRenderer.send('window:maximize'),
+  close: () => ipcRenderer.send('window:close')
+});

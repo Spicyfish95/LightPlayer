@@ -63,7 +63,44 @@ _PIP_PROC = None
 
 
 def emit(kind, **data):
+    if kind == "gpu-setup" and _SETUP_LOG:
+        _log_write("[%s] %s: %s\n" % (time.strftime("%H:%M:%S"), data.get("phase", SETUP_PHASE), data.get("message", "")))
     print(json.dumps({"kind": kind, **data}, ensure_ascii=False), flush=True)
+
+
+# gpu-setup 全程日志文件路径（SETUP_MODE 下初始化）。UI 只显示错误尾部 260 字符，
+# 完整的下载/安装/pip 输出都落盘到这里，是排查「卡 99% 后失败」的唯一一手资料。
+_SETUP_LOG = ""
+
+
+def _open_setup_log():
+    """SETUP_MODE 下打开/续写 lib\\gpu-setup.log（追加，保留历史失败记录）；返回路径。"""
+    global _SETUP_LOG
+    if not SETUP_MODE:
+        return ""
+    base = LIB_DIR or tempfile.gettempdir()
+    path = os.path.join(base, "gpu-setup.log")
+    try:
+        with open(path, "a", encoding="utf-8", errors="replace") as fh:
+            fh.write("\n===== GPU 依赖安装 · %s · Python %s · lib=%s =====\n"
+                     % (time.strftime("%Y-%m-%d %H:%M:%S"), platform.python_version(), LIB_DIR or "?"))
+        _SETUP_LOG = path
+    except OSError:
+        _SETUP_LOG = ""
+    return _SETUP_LOG
+
+
+def _log_write(text):
+    if _SETUP_LOG:
+        try:
+            with open(_SETUP_LOG, "a", encoding="utf-8", errors="replace") as fh:
+                fh.write(text)
+        except OSError:
+            pass
+
+
+def _log_hint():
+    return f"（详细日志：{_SETUP_LOG}）" if _SETUP_LOG else ""
 
 
 def set_setup_phase(phase):
@@ -369,13 +406,16 @@ def parse_progress_percent(text):
     return None
 
 
-def _scan_dir_size(path):
-    """递归统计目录下所有文件总字节，作为 pip 在管道下不输出进度条时的可靠下载进度来源。"""
+def _scan_dir_size(path, skip_dirs=()):
+    """递归统计目录下所有文件总字节，作为 pip 在管道下不输出进度条时的可靠进度来源。
+    skip_dirs 中的目录名（相对任意层级的目录名）不统计，用于排除下载暂存等预置大文件目录。"""
     total = 0
     if not path or not os.path.isdir(path):
         return total
+    skip = set(skip_dirs)
     try:
-        for root, _dirs, files in os.walk(path):
+        for root, dirs, files in os.walk(path):
+            dirs[:] = [d for d in dirs if d not in skip]
             for f in files:
                 try:
                     total += os.path.getsize(os.path.join(root, f))
@@ -399,15 +439,22 @@ def _format_bytes(num):
     return f"{num:.1f} TB"
 
 
-def run_pip_with_progress(command, label, network=True, idle_timeout=60, pbase=4, pspan=0.06, mode="single", watch_dir=None):
+def run_pip_with_progress(command, label, network=True, idle_timeout=60, pbase=4, pspan=0.06,
+                          mode="single", watch_dir=None, extra_env=None, watch_skip=(), expected_total=0.0):
     """运行 pip 命令并把进度映射到 [pbase, pbase+100*pspan] 区间，并支持用户取消。
     mode="single"   单个 pip 的进度条百分比（ASR 依赖安装）；
     mode="download" 多文件聚合下载进度（已下载字节 / 已知总字节），用于「下载」阶段；
-    mode="install"  安装阶段按时间平滑推进（安装过程 pip 无可靠百分比）。"""
+    mode="install"  安装阶段：expected_total 有值时按「已落盘字节 / 预期总字节」推进真实进度，
+                    并显示实测写入速度；无值时退回按时间平滑推进（安装过程 pip 无可靠百分比）。
+    watch_dir 有值时，目录字节数持续增长会重置空闲计时——pip 在管道模式下传输/复制大文件时
+    stdout 长时间零输出，不能仅凭「无输出」判死，磁盘在长才是真的在干活。
+    watch_dir 可传单个路径，也可传路径列表（安装阶段需同时覆盖 pip 的同盘暂存目录与最终
+    安装目录：解压/暂存只写暂存目录，提交阶段才写最终目录，缺一个都会误判空闲）。"""
     import queue
     global _PIP_PROC
     output = ""
     chunks = queue.Queue()
+    watch_paths = [watch_dir] if isinstance(watch_dir, str) else list(watch_dir or [])
 
     def reader():
         while True:
@@ -416,7 +463,11 @@ def run_pip_with_progress(command, label, network=True, idle_timeout=60, pbase=4
             if not chunk:
                 break
 
-    proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)
+    popen_env = dict(os.environ)
+    if extra_env:
+        popen_env.update(extra_env)
+    proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            bufsize=0, env=popen_env)
     with _PIP_LOCK:
         _PIP_PROC = proc
     thread = threading.Thread(target=reader, daemon=True)
@@ -433,25 +484,45 @@ def run_pip_with_progress(command, label, network=True, idle_timeout=60, pbase=4
     completed_bytes = 0.0    # download 模式：已完成文件字节（按 Saved 事件累计，作为辅助）
     cur_size = 0.0           # download 模式：当前文件字节
     last_agg = 0.0           # download 模式：已上报的聚合百分比（单调不回退）
-    last_watch = started     # download 模式：上次 watch_dir 扫描时间戳
-    cur_dir_bytes = 0        # download 模式：watch_dir 当前已落盘字节数
+    last_watch = started     # watch_dir 上次扫描时间戳
+    cur_dir_bytes = 0        # watch_dir 当前已落盘字节数
+    prev_dir_bytes = -1      # 上一轮扫描字节数，用于识别「磁盘在长」
+    install_speed = 0.0      # install 模式：最近一次扫描测得的落盘速度（字节/秒）
+    last_bytes_at = started  # 上次速度采样时间戳
+    last_bytes_val = 0       # 上次速度采样字节数
+    write_started_at = 0.0   # install 模式：检测到实质写入（≥1MB）的时刻，用于平均速度
 
     def show(msg, percent):
         progress_emit("dependency", msg, percent=max(pbase, min(pbase + int(100 * pspan), int(percent))))
 
     def maybe_scan_watch():
-        """扫描 watch_dir 实际文件大小作为最可靠的下载进度来源。
-        pip 在管道模式下不输出 rich 进度条，唯有从文件系统层面统计已落盘字节才能实时反映进度。"""
-        nonlocal last_watch, last_agg, cur_dir_bytes
-        if mode != "download" or not watch_dir or known_total <= 0:
+        """扫描 watch_dir 实际文件大小：既是最可靠的进度来源，也用于保活判定。
+        pip 在管道模式下不输出 rich 进度条/复制大文件时零输出，唯有文件系统层面的字节增长
+        能证明它在干活；只要字节在长就重置空闲计时，杜绝「慢但正常」被误杀。"""
+        nonlocal last_watch, last_agg, cur_dir_bytes, prev_dir_bytes, no_data_since
+        nonlocal install_speed, last_bytes_at, last_bytes_val
+        if not watch_paths or (mode not in ("download", "install")):
             return
-        if time.monotonic() - last_watch < 2:
+        # install 目录包含上万个小文件，扫描本身有可观的 I/O 开销，与 pip 争抢磁盘；
+        # 拉长到 4 秒一次（download 目录小，维持 2 秒）
+        if time.monotonic() - last_watch < (4.0 if mode == "install" else 2.0):
             return
         last_watch = time.monotonic()
-        cur_dir_bytes = _scan_dir_size(watch_dir)
-        agg = min(99.0, cur_dir_bytes * 100.0 / known_total)
-        if agg > last_agg:
-            last_agg = agg
+        cur_dir_bytes = sum(_scan_dir_size(p, skip_dirs=watch_skip) for p in watch_paths)
+        if cur_dir_bytes > prev_dir_bytes:
+            # 目录在增长：pip 正在下载落盘或复制安装文件，空闲计时从头算
+            no_data_since = time.monotonic()
+        if mode == "install" and cur_dir_bytes >= last_bytes_val and cur_dir_bytes > 0:
+            dt = time.monotonic() - last_bytes_at
+            if dt > 0:
+                install_speed = (cur_dir_bytes - last_bytes_val) / dt
+        last_bytes_at = time.monotonic()
+        last_bytes_val = cur_dir_bytes
+        prev_dir_bytes = cur_dir_bytes
+        if mode == "download" and known_total > 0:
+            agg = min(99.0, cur_dir_bytes * 100.0 / known_total)
+            if agg > last_agg:
+                last_agg = agg
 
     try:
         while thread.is_alive() or not chunks.empty():
@@ -472,9 +543,29 @@ def run_pip_with_progress(command, label, network=True, idle_timeout=60, pbase=4
                 if time.monotonic() - last_report >= 2:
                     elapsed = int(time.monotonic() - started)
                     if mode == "install":
-                        # 安装阶段：按时间平滑推进，最多到区间的 95%，完成时由调用方置 100%
-                        creep = min(0.95, (time.monotonic() - started) / 60.0)
-                        show(last_clean or f"{label}…", pbase + creep * 100 * pspan)
+                        # 写入未真正开始（< 1MB）：pip 正在解析 wheel 元数据/等待杀软扫描 2.6GB 压缩包，
+                        # 这一阶段几乎零写入，把零星字节渲染成「速度 X B/s」会让用户误以为卡死
+                        if cur_dir_bytes < 1000 * 1000:
+                            note = "正在准备安装（解析安装包元数据，安全软件首次扫描大压缩包可能耗时 1-3 分钟）"
+                            if elapsed >= 120:
+                                note += "，如长时间无进展请将软件目录加入杀毒软件排除项"
+                            show(f"{label}…（{note}，已等待 {elapsed} 秒）", pbase + 2)
+                        elif expected_total > 0:
+                            # 真实进度：已落盘字节 / 预期总字节，上限 99%（完成时由调用方置 100%）。
+                            # 字节来自 pip 同盘暂存目录（解压）+ 最终安装目录（提交），是 pip 实际写入量；
+                            # 速度取「写入开始以来的平均值」，避免瞬时采样在间歇写入时显得过慢
+                            if write_started_at <= 0:
+                                write_started_at = time.monotonic()
+                            avg_speed = cur_dir_bytes / max(1.0, time.monotonic() - write_started_at)
+                            frac = min(0.99, cur_dir_bytes / float(expected_total))
+                            show(f"{label}…（已写入 {_format_bytes(cur_dir_bytes)} / 约 {_format_bytes(expected_total)}，"
+                                 f"平均 {_format_bytes(avg_speed)}/s，已用 {elapsed} 秒）",
+                                 pbase + frac * 100 * pspan)
+                        else:
+                            # 兜底：无法估算总量时按时间平滑推进，数字在动就能证明没卡死
+                            creep = min(0.99, (time.monotonic() - started) / 90.0)
+                            written = f"，已解包/写入 {_format_bytes(cur_dir_bytes)}" if watch_paths and cur_dir_bytes else ""
+                            show(f"{label}…（已用 {elapsed} 秒{written}）", pbase + creep * 100 * pspan)
                     elif mode == "download" and known_total > 0:
                         # 下载中：显示聚合百分比 + 已下载字节/总字节 + 已用秒数
                         show(f"{label} · {current_file or ''} {int(last_agg)}%"
@@ -538,8 +629,12 @@ def run_pip_with_progress(command, label, network=True, idle_timeout=60, pbase=4
                 if mode == "install":
                     if seg != last_clean:
                         last_clean = seg
-                        creep = min(0.95, (time.monotonic() - started) / 60.0)
-                        show(seg[-180:], pbase + creep * 100 * pspan)
+                        # pip 每输出一行也按真实字节进度推进，与心跳显示保持一致
+                        if expected_total > 0 and cur_dir_bytes > 0:
+                            frac = min(0.99, cur_dir_bytes / float(expected_total))
+                        else:
+                            frac = min(0.99, (time.monotonic() - started) / 90.0)
+                        show(seg[-180:], pbase + frac * 100 * pspan)
                         last_report = time.monotonic()
                     continue
                 # single 模式：沿用原来的「当前文件百分比 + 安装阶段」判定
@@ -568,6 +663,230 @@ def run_pip_with_progress(command, label, network=True, idle_timeout=60, pbase=4
     finally:
         with _PIP_LOCK:
             _PIP_PROC = None
+        if _SETUP_LOG and output.strip():
+            _log_write("\n--- pip 输出（%s）---\n%s\n--- pip 输出结束 ---\n" % (label, output))
+
+
+def _win_long_path(path):
+    r"""Windows 下给接近 MAX_PATH 的路径加 \\?\ 前缀，避免深层包解包时文件名过长失败。"""
+    if os.name != "nt" or path.startswith("\\\\?\\"):
+        return path
+    if len(path) < 240:
+        return path
+    if path.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + path.lstrip("\\")
+    return "\\\\?\\" + os.path.abspath(path)
+
+
+def _wheel_member_target(member, target):
+    """wheel zip 成员名 -> target 下的落盘绝对路径（按 wheel 规范处理 <dist>.data/<category>/）。
+    返回 None 表示该成员跳过；路径逃逸出 target 时抛 ValueError（防 zip-slip）。"""
+    name = member.filename.replace("\\", "/")
+    parts = [p for p in name.split("/") if p not in ("", ".")]
+    if not parts or member.is_dir():
+        return None
+    if parts[0].endswith(".data") and len(parts) >= 3:
+        category = parts[1]
+        rest = parts[2:]
+        if category in ("purelib", "platlib", "data"):
+            rel = rest
+        elif category == "scripts":
+            rel = (["Scripts"] if os.name == "nt" else ["bin"]) + rest
+        elif category in ("headers", "header"):
+            rel = ["include"] + rest
+        else:
+            return None
+    else:
+        rel = parts
+    dest = os.path.normpath(os.path.join(target, *rel))
+    base = os.path.normpath(target)
+    if os.path.normcase(dest) != os.path.normcase(base) and \
+            not os.path.normcase(dest).startswith(os.path.normcase(base + os.sep)):
+        raise ValueError("wheel 成员路径越界: " + member.filename)
+    return dest
+
+
+def _select_local_wheels(main_wheel, wheels_dir):
+    """挑选要直解压安装的本地 wheel：主 wheel 必选；其余按分发名分组，每组只保留与当前
+    Python 兼容的最高版本（防止 wheels 目录里历史升级残留的旧版本/其他 ABI wheel 混入）。
+    返回路径列表；packaging 不可用、无法可靠挑选时返回 None（调用方改走 pip 兜底）。"""
+    try:
+        from packaging.utils import canonicalize_name, parse_wheel_filename
+        from packaging.tags import sys_tags
+    except Exception:
+        return None
+    try:
+        supported = set(sys_tags())
+    except Exception:
+        supported = None
+    groups = collections.defaultdict(list)
+    try:
+        names = os.listdir(wheels_dir)
+    except OSError:
+        return None
+    for fn in names:
+        if not fn.lower().endswith(".whl"):
+            continue
+        full = os.path.join(wheels_dir, fn)
+        if os.path.normcase(os.path.abspath(full)) == os.path.normcase(os.path.abspath(main_wheel)):
+            continue
+        try:
+            name, ver, build, tags = parse_wheel_filename(fn)
+        except Exception:
+            continue
+        if supported is not None and not (set(tags) & supported):
+            continue
+        groups[canonicalize_name(name)].append((ver, build if build is not None else -1, full))
+    picked = [main_wheel]
+    for group in groups.values():
+        group.sort(key=lambda x: (x[0], x[1]))
+        picked.append(group[-1][2])
+    return picked
+
+
+def direct_install_wheels(wheel_paths, target, label, pbase=0.0, pspan=0.98, workers=None):
+    """多线程直接把本地 wheel 解包到 target，绕过 pip 安装大 wheel 的三遍写盘：
+    pip 先解压到 pip-unpack（4.2GB 写），再全量复制到 pip-target 暂存（又 4.2GB 写，
+    数万小文件逐个被杀软扫描），最后才提交 --target，并串行编译数千个 pyc；
+    直解压只写一遍、inflate 与文件写入多线程并行（zlib 解压会释放 GIL，还能重叠杀软扫描
+    的等待时间），真机实测 2.6GB cu126 wheel：pip 约 176s，8 线程直解压约 38s。
+    已存在且字节数一致的文件直接跳过，使失败/取消后重试可断点续装；文件先写 .part 再
+    原子改名，避免半成品。返回 True=成功 / False=失败（调用方回退 pip）/ 130=用户取消。"""
+    if workers is None:
+        workers = min(8, max(2, os.cpu_count() or 4))
+    wheel_infos = []
+    total_bytes = 0
+    try:
+        for wp in wheel_paths:
+            with zipfile.ZipFile(wp) as zf:
+                infos = [i for i in zf.infolist() if not i.is_dir()]
+            wheel_infos.append((wp, infos))
+            total_bytes += sum(i.file_size for i in infos)
+        os.makedirs(target, exist_ok=True)
+    except Exception as exc:
+        _log_write("直解压准备失败：%r\n" % (exc,))
+        return False
+
+    local = threading.local()
+    lock = threading.Lock()
+    state = {"done": 0, "last_emit": time.monotonic(), "partials": []}
+    samples = collections.deque()   # (时间戳, 已完成字节)，用于近窗瞬时速度/ETA
+    t0 = time.monotonic()
+
+    def show(done, force=False):
+        now = time.monotonic()
+        if not force and now - state["last_emit"] < 1.0:
+            return
+        state["last_emit"] = now
+        samples.append((now, done))
+        while samples and now - samples[0][0] > 6.0:
+            samples.popleft()
+        elapsed = now - t0
+        frac = min(0.99, done / float(total_bytes)) if total_bytes else 0.99
+        avg = done / max(0.1, elapsed)
+        # 大 wheel 开头是上万个小头文件（受杀软扫描影响），随后大 DLL 速度会飙升数倍，
+        # 全程平均速度会在开头给出离谱的「剩余 20 分钟」；用近 6 秒瞬时速度估算 ETA 更贴近实际
+        win_speed = 0.0
+        if len(samples) >= 2 and now - samples[0][0] > 0.5:
+            win_speed = (done - samples[0][1]) / (now - samples[0][0])
+        speed = win_speed or avg
+        eta = (total_bytes - done) / speed if speed > 0 and done > 0 else 0
+        eta_txt = ("，剩余约 %d 秒" % int(eta)) if eta > 1 else ""
+        progress_emit("dependency",
+                      f"{label}（{workers} 线程并行解包：{_format_bytes(done)} / 约 {_format_bytes(total_bytes)}，"
+                      f"{_format_bytes(speed)}/s，已用 {int(elapsed)} 秒{eta_txt}）",
+                      percent=int((pbase + frac * pspan) * 100))
+
+    def work(item):
+        wp, info = item
+        if CANCEL_EVENT.is_set():
+            return None
+        dest = _wheel_member_target(info, target)
+        if dest is None:
+            return info.file_size
+        long_dest = _win_long_path(dest)
+        tmp = None
+        try:
+            if os.path.exists(long_dest) and os.path.getsize(long_dest) == info.file_size:
+                return info.file_size  # 断点续装：上次已完整写入（先 .part 后原子改名，不存在半成品）
+            parent = _win_long_path(os.path.dirname(dest))
+            os.makedirs(parent, exist_ok=True)
+            handles = getattr(local, "handles", None)
+            if handles is None:
+                handles = {}
+                local.handles = handles
+            zf = handles.get(wp)
+            if zf is None:
+                zf = zipfile.ZipFile(wp)
+                handles[wp] = zf
+            tmp = "%s.part%d" % (dest, threading.get_ident())
+            with lock:
+                state["partials"].append(tmp)
+            with zf.open(info, "r") as src, open(_win_long_path(tmp), "wb", buffering=1 << 20) as out:
+                shutil.copyfileobj(src, out, 1 << 20)
+            os.replace(_win_long_path(tmp), long_dest)
+            if os.name != "nt":
+                mode = (info.external_attr >> 16) & 0o777
+                if mode & 0o111:
+                    try:
+                        os.chmod(long_dest, 0o755)
+                    except OSError:
+                        pass
+        finally:
+            # 无论成功与否都从待清理列表移除（改名成功则文件已不存在）
+            if tmp is not None:
+                with lock:
+                    try:
+                        state["partials"].remove(tmp)
+                    except ValueError:
+                        pass
+        return info.file_size
+
+    def cleanup_partials():
+        with lock:
+            partials = list(state["partials"])
+        for p in partials:
+            try:
+                os.remove(_win_long_path(p))
+            except OSError:
+                pass
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    futures = []
+    pool = ThreadPoolExecutor(max_workers=workers)
+    try:
+        for wp, infos in wheel_infos:
+            for info in infos:
+                futures.append(pool.submit(work, (wp, info)))
+        for fut in as_completed(futures):
+            try:
+                size = fut.result()
+            except Exception as exc:
+                # 用户取消时，已提交未开始的任务被 cancel()，会以 CancelledError 结束，优先判取消
+                if CANCEL_EVENT.is_set():
+                    cleanup_partials()
+                    progress_emit("dependency", "已取消安装（已完成部分会保留，重试可断点续装）", percent=0)
+                    return 130
+                cleanup_partials()
+                _log_write("直解压成员失败，回退 pip：%r\n" % (exc,))
+                progress_emit("dependency",
+                              f"快速解包遇到问题（{str(exc)[-80:]}），正在自动切换到标准安装流程", percent=1)
+                return False
+            if size:
+                with lock:
+                    state["done"] += size
+                    done = state["done"]
+                show(done)
+            if CANCEL_EVENT.is_set():
+                for f in futures:
+                    f.cancel()
+                cleanup_partials()
+                progress_emit("dependency", "已取消安装（已完成部分会保留，重试可断点续装）", percent=0)
+                return 130
+    finally:
+        pool.shutdown(wait=True)
+    show(total_bytes, force=True)
+    return True
 
 
 def install_packages(packages):
@@ -806,12 +1125,38 @@ def resolve_cuda_wheel():
     return None
 
 
+def _wheel_valid(path):
+    """校验 wheel 的 zip 结构与 CRC 完整性。
+    跨镜像 .part 断点续传拼接、镜像间同名文件内容不一致，都可能产出「大小正确但内容
+    损坏」的 wheel；若不在此拦下，pip 会在安装阶段解包报错——表现为下载 100% 后
+    安装卡在 99% 失败，且错误信息晦涩。"""
+    try:
+        with zipfile.ZipFile(path) as z:
+            return z.testzip() is None
+    except Exception:
+        return False
+
+
 def _download_one_source(url, dest, total, label, pbase, pspan, stall_timeout=30):
     """从单个 URL 下载（支持断点续传的 .part 文件），实时上报百分比/字节/速度。
     完成返回 True；取消抛 _DownloadCanceled；网络中断抛异常由外层换源（.part 保留，换源后续传）。"""
     part = dest + ".part"
     existing = os.path.getsize(part) if os.path.isfile(part) else 0
-    if existing >= total:
+    if existing > total:
+        # 残留 .part 比本次目标还大（换源/换版本后 total 变小）：内容必然不可信，丢弃重下。
+        # 旧逻辑 >= total 直接 os.replace 当成品，会把坏文件带进安装阶段
+        try:
+            os.remove(part)
+        except OSError:
+            pass
+        existing = 0
+    if existing == total:
+        if not _wheel_valid(part):
+            try:
+                os.remove(part)
+            except OSError:
+                pass
+            raise IOError("断点文件校验失败，已删除重新下载")
         os.replace(part, dest)
         return True
     headers = dict(_UA)
@@ -851,6 +1196,14 @@ def _download_one_source(url, dest, total, label, pbase, pspan, stall_timeout=30
                                   percent=int(pbase + pct * pspan))
     if os.path.getsize(part) != total:
         raise IOError("下载文件大小与服务器不一致")
+    progress_emit("dependency", f"{label} · 正在校验安装包完整性", percent=int(pbase + 99 * pspan))
+    if not _wheel_valid(part):
+        # 坏包就地删除：外层换源/重试，绝不把损坏文件带进安装阶段
+        try:
+            os.remove(part)
+        except OSError:
+            pass
+        raise IOError("下载内容校验失败（zip 损坏）")
     os.replace(part, dest)
     return True
 
@@ -866,7 +1219,14 @@ def download_cuda_wheel(wheels, pbase=0, pspan=0.9):
     fname, first_name, first_url, size = info
     dest = os.path.join(wheels, fname)
     if os.path.isfile(dest) and os.path.getsize(dest) == size:
-        return dest, fname, fname.split("-")[1]
+        if _wheel_valid(dest):
+            return dest, fname, fname.split("-")[1]
+        # 缓存的 wheel 已损坏（旧版本未校验时留下的）：删除后重新走完整下载
+        progress_emit("dependency", "本地缓存的安装包已损坏，正在重新下载", percent=int(pbase))
+        try:
+            os.remove(dest)
+        except OSError:
+            pass
     progress_emit("dependency",
                   f"正在下载 CUDA 版 PyTorch（{_format_bytes(size)}）· 首选{first_name}",
                   percent=int(pbase))
@@ -895,8 +1255,370 @@ def download_cuda_wheel(wheels, pbase=0, pspan=0.9):
                               percent=int(pbase))
                 if attempt == 1:
                     time.sleep(1)
-    progress_emit("dependency", f"所有下载源均失败：{last_err}", percent=0)
+    progress_emit("dependency", f"所有下载源均失败：{last_err}{_log_hint()}", percent=0)
     return None
+
+
+# METADATA 读取失败时的兜底依赖（torch cu126 Windows wheel 的纯 Python 运行期依赖）
+_FALLBACK_TORCH_DEPS = ["filelock", "typing-extensions", "sympy", "networkx", "jinja2", "fsspec"]
+# 即使 marker 评估缺失也必须排除的非 Windows / 非 pip 直装依赖前缀
+_EXCLUDE_REQ_PREFIXES = ("nvidia-", "triton", "pytorch-", "torch-")
+
+
+def _marker_matches(marker):
+    """评估 Requires-Dist 上的 environment marker 是否适用于当前环境。
+    优先用 packaging；缺失时用字符串粗过滤（只排 Linux/Darwin/extra 专属项，宁可多下小 wheel）。"""
+    try:
+        from packaging.markers import Marker
+        return Marker(marker).evaluate()
+    except Exception:
+        m = marker.lower().replace(" ", "")
+        if '"linux"' in m or "'linux'" in m or '"darwin"' in m or "'darwin'" in m:
+            return False
+        if "extra==" in m:
+            return False
+        return True
+
+
+def read_wheel_runtime_reqs(wheel_path):
+    """从已下载到本地的 wheel 中读取 .dist-info/METADATA 的 Requires-Dist，
+    返回当前环境适用的 requirement 列表（去掉 marker，保留版本约束）；无法解析时返回 None。"""
+    try:
+        from email import message_from_bytes
+        with zipfile.ZipFile(wheel_path) as z:
+            meta_names = [n for n in z.namelist()
+                          if n.endswith(".dist-info/METADATA") and n.count("/") == 1]
+            if not meta_names:
+                return None
+            msg = message_from_bytes(z.read(meta_names[0]))
+        result = []
+        seen = set()
+        for raw in msg.get_all("Requires-Dist") or []:
+            line = raw.strip()
+            if ";" in line:
+                req_part, marker = line.split(";", 1)
+                if not _marker_matches(marker):
+                    continue
+            else:
+                req_part = line
+            req_part = req_part.strip()
+            name_m = re.match(r"[A-Za-z0-9][A-Za-z0-9._-]*", req_part)
+            if not name_m:
+                continue
+            name = name_m.group(0).lower()
+            if name == "torch" or name.startswith(_EXCLUDE_REQ_PREFIXES) or name in seen:
+                continue
+            seen.add(name)
+            result.append(req_part)
+        return result or None
+    except Exception:
+        return None
+
+
+def probe_pypi_mirrors(sources, probe_pkg="filelock", timeout=8):
+    """并发探测 PyPI 镜像的「实际下载吞吐」，返回按速度降序的 [(name, url)]。
+    只测 TLS 握手延迟会把「连通快但下载慢」的源排到前面（实测曾连切 3 个源到第 4 个才成功）；
+    这里抓 filelock 的索引页找到 py3-none-any 小 wheel，Range 拉前 256KB 实测速率。"""
+    results = []
+    lock = threading.Lock()
+
+    def one(sname, base):
+        if CANCEL_EVENT.is_set():
+            return
+        started = time.monotonic()
+        try:
+            idx = base.rstrip("/") + "/" + probe_pkg + "/"
+            req = urllib.request.Request(idx, headers=_UA)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                html = resp.read().decode("utf-8", errors="ignore")
+            # 优先纯 Python wheel（任何机器可用），否则取第一个 wheel
+            hrefs = re.findall(r'href="([^"]+\.whl)[^"]*"', html)
+            pick = next((h for h in hrefs if "py3-none-any" in h), hrefs[0] if hrefs else None)
+            if not pick:
+                return
+            wheel_url = urllib.request.urljoin(idx, pick.replace("&amp;", "&"))
+            headers = dict(_UA, **{"Range": "bytes=0-262143"})
+            t0 = time.monotonic()
+            with urllib.request.urlopen(urllib.request.Request(wheel_url, headers=headers),
+                                        timeout=timeout) as resp:
+                data = resp.read(262144)
+            dt = max(1e-6, time.monotonic() - t0)
+            speed = len(data) / dt
+            with lock:
+                results.append((speed, time.monotonic() - started, sname, base))
+        except Exception:
+            # 吞吐探测失败（不支持 Range/页面结构差异等）：退化为只记录连通性，速度按 0 排末尾
+            try:
+                t0 = time.monotonic()
+                with urllib.request.urlopen(urllib.request.Request(
+                        base.rstrip("/") + "/" + probe_pkg + "/", headers=_UA), timeout=timeout) as resp:
+                    resp.read(256)
+                with lock:
+                    results.append((0.0, time.monotonic() - t0, sname, base))
+            except Exception:
+                pass
+
+    threads = [threading.Thread(target=one, args=(n, u), daemon=True) for n, u in sources]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout + 2)
+    # 速度降序，速度相同/为 0 时按连通延迟升序
+    results.sort(key=lambda x: (-x[0], x[1]))
+    reachable = [(n, u) for _, _, n, u in results]
+    if reachable:
+        detail = "、".join(
+            (n + (f" {_format_bytes(results[i][0])}/s" if results[i][0] > 0 else ""))
+            for i, (_, _, n, _) in enumerate(results[:3]))
+        progress_emit("dependency", f"下载源测速完成，优先使用{detail}", percent=90)
+    return reachable
+
+
+# ---------------------------------------------------------------------------
+# PyTorch 配套小依赖下载
+#
+# 历史教训：这一步若交给 pip 在线执行，在「可连但极慢 / TLS 握手停滞」的网络下，
+# pip 抓取 simple 索引页期间 stdout 零输出、数据只进内存不落盘，每个源都要耗满
+# --timeout×--retries（约 60 秒）才失败，5 个源全部走一遍才进入 --no-deps 兜底
+# 安装（用户看到的就是「走完所有源、每源等 60 秒」）。这些包总共才约 10MB，因此
+# 与 2.6GB 主 wheel 一样改用 urllib 直链：自己抓 simple 页、按当前解释器选择兼容
+# wheel、逐文件故障转移，全程有真实进度；pip 只负责后续的本地离线安装。
+# ---------------------------------------------------------------------------
+
+def _req_name_and_spec(req_text):
+    """拆分 requirement：'sympy>=1.13.3' -> ('sympy', '>=1.13.3')；名字按 PEP 503 规范化。"""
+    m = re.match(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(.*)$", req_text or "")
+    if not m:
+        return None, ""
+    return re.sub(r"[-_.]+", "-", m.group(1)).lower(), m.group(2).strip()
+
+
+def _parse_wheel_fname(fname):
+    """解析 wheel 文件名 -> (规范化包名, Version, (py标签, abi标签, 平台标签))；非法返回 None。"""
+    if not fname.endswith(".whl"):
+        return None
+    parts = fname[:-4].split("-")
+    if len(parts) not in (5, 6):      # 5 段为常规格式，6 段带 build 号
+        return None
+    # wheel 规范：{name}-{version}(-{build})?-{py}-{abi}-{platform}，
+    # name 中的连字符在文件名里已转写为下划线，故 version 恒为第 2 段，标签恒为末 3 段
+    try:
+        from packaging.version import Version
+        ver = Version(parts[1])
+    except Exception:
+        return None
+    py_tag, abi_tag, plat_tag = parts[-3], parts[-2], parts[-1]
+    name = re.sub(r"[-_.]+", "-", parts[0]).lower()
+    return name, ver, (py_tag, abi_tag, plat_tag)
+
+
+def _wheel_tag_ranks():
+    """当前解释器可用 wheel 标签的优先级表（rank 越小越优先）。优先用 packaging.tags，
+    缺失时按当前平台手写一组兜底标签。"""
+    try:
+        from packaging.tags import sys_tags
+        return {(t.interpreter, t.abi, t.platform): i for i, t in enumerate(sys_tags())}
+    except Exception:
+        vi = sys.version_info
+        cp = f"cp{vi.major}{vi.minor}"
+        ranks = {}
+        if sys.platform == "win32":
+            plat = {"amd64": "win_amd64", "x86": "win32",
+                    "arm64": "win_arm64"}.get(platform.machine().lower())
+            if plat:
+                for i, tag in enumerate(((cp, cp, plat), (cp, "abi3", plat),
+                                         ("cp3", "abi3", plat))):
+                    ranks.setdefault(tag, i)
+        for i, tag in enumerate(("py3", "none", "any")):
+            ranks.setdefault(tag, len(ranks))
+        return ranks
+
+
+def _pick_best_wheel(hrefs, page_url, name, spec_text, tag_ranks):
+    """从 simple 索引页的全部链接里，选出满足版本约束且与当前解释器最匹配的 wheel。
+    返回 (文件名, 绝对URL, 版本字符串) 或 None。"""
+    try:
+        from packaging.specifiers import SpecifierSet
+        spec = SpecifierSet(spec_text) if spec_text else SpecifierSet()
+    except Exception:
+        spec = None
+    best = None       # (标签优先级, 版本) 越大越优
+    best_pick = None
+    for href in hrefs:
+        clean = href.split("#", 1)[0].split("?", 1)[0].strip()
+        fname = clean.rsplit("/", 1)[-1]
+        parsed = _parse_wheel_fname(fname)
+        if not parsed:
+            continue
+        wname, ver, tags = parsed
+        if wname != name or tags not in tag_ranks:
+            continue
+        if spec is not None:
+            try:
+                # prereleases=False：与 pip 默认行为一致，不选 a/b/rc/dev 版
+                if not spec.contains(ver, prereleases=False):
+                    continue
+            except Exception:
+                continue
+        key = (-tag_ranks[tags], ver)
+        if best is None or key > best:
+            best = key
+            best_pick = (fname, urllib.request.urljoin(page_url, clean), str(ver))
+    return best_pick
+
+
+def _stream_url(url, timeout=20):
+    """打开 URL 返回响应对象（调用方流式 read）。socket 级 timeout 同时作用于连接与每次
+    recv：持续有字节到达就不会超时（慢而不断），停滞即抛错由上层换源（死链快败）。"""
+    req = urllib.request.Request(url, headers=_UA)
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
+def _fetch_simple_index(url, pkg, sname):
+    """抓取 simple 索引页（慢网络下也持续上报已接收字节，避免 UI 静默），返回 HTML 文本。"""
+    started = time.monotonic()
+    last_report = started
+    received = 0
+    parts = []
+    with _stream_url(url, timeout=15) as resp:
+        while True:
+            if CANCEL_EVENT.is_set():
+                raise _DownloadCanceled()
+            chunk = resp.read(65536)
+            if not chunk:
+                break
+            parts.append(chunk)
+            received += len(chunk)
+            now = time.monotonic()
+            if now - last_report >= 1:
+                last_report = now
+                progress_emit("dependency",
+                              f"正在从{sname}获取 {pkg} 版本列表（已接收 {_format_bytes(received)}）",
+                              percent=89)
+    return b"".join(parts).decode("utf-8", errors="ignore")
+
+
+def _download_small_wheel(url, dest, fname, sname, pct):
+    """下载单个小型 wheel（< 10MB）。完成返回 True；取消抛 _DownloadCanceled；失败抛异常换源。"""
+    started = time.monotonic()
+    last_report = started
+    done = 0
+    window = collections.deque()
+    tmp = dest + ".part"
+    with _stream_url(url) as resp, open(tmp, "wb") as out:
+        total = 0
+        try:
+            total = int(resp.headers.get("Content-Length", 0)) or 0
+        except (TypeError, ValueError):
+            total = 0
+        while True:
+            if CANCEL_EVENT.is_set():
+                raise _DownloadCanceled()
+            chunk = resp.read(65536)
+            if not chunk:
+                break
+            out.write(chunk)
+            done += len(chunk)
+            now = time.monotonic()
+            window.append((now, len(chunk)))
+            while window and now - window[0][0] > 5:
+                window.popleft()
+            if now - last_report >= 0.5:
+                last_report = now
+                speed = sum(b for _, b in window) / max(1e-6, now - window[0][0])
+                size_txt = f"{_format_bytes(done)} / {_format_bytes(total)}" if total else _format_bytes(done)
+                progress_emit("dependency",
+                              f"正在下载配套依赖 {fname}（{size_txt}，{_format_bytes(speed)}/s）",
+                              percent=pct)
+    if os.path.getsize(tmp) <= 0:
+        raise IOError("下载文件为空")
+    if not _wheel_valid(tmp):
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise IOError("下载内容校验失败（zip 损坏）")
+    os.replace(tmp, dest)
+    return dest
+
+
+def download_torch_deps(deps, wheels, sources):
+    """用 urllib 直链把 PyTorch 配套依赖（含递归传递依赖，如 sympy→mpmath、jinja2→MarkupSafe）
+    下载到 wheels 目录。全部成功返回 True；任一依赖在所有源上失败/被取消返回 False，
+    由调用方回退到 pip 在线下载。全程进度占 89%~97%。"""
+    tag_ranks = _wheel_tag_ranks()
+    pending = list(deps)
+    queued = set()          # 已下载或在队中的规范化包名
+    completed = 0
+    try:
+        return _download_torch_deps_loop(tag_ranks, pending, queued, wheels, sources)
+    except _DownloadCanceled:
+        # 用户取消：交由调用方的 CANCEL_EVENT 分支输出「已取消下载」，不当作异常
+        return False
+
+
+def _download_torch_deps_loop(tag_ranks, pending, queued, wheels, sources):
+    completed = 0
+    while pending:
+        req_text = pending.pop(0)
+        name, spec_text = _req_name_and_spec(req_text)
+        if not name or name in queued:
+            continue
+        queued.add(name)
+        pct = min(97, 89 + completed)
+        last_err = ""
+        saved_path = None
+        part_path = ""
+        for s_i, (sname, base) in enumerate(sources):
+            if CANCEL_EVENT.is_set():
+                return False
+            idx_url = base.rstrip("/") + "/" + name + "/"
+            try:
+                if s_i:
+                    progress_emit("dependency",
+                                  f"{name} 下载切换到{sname}重试", percent=pct)
+                html = _fetch_simple_index(idx_url, name, sname)
+                hrefs = re.findall(r'''href\s*=\s*["']?([^"'>\s]+)''', html, re.I)
+                pick = _pick_best_wheel(hrefs, idx_url, name, spec_text, tag_ranks)
+                if not pick:
+                    last_err = f"{sname} 上没有适配当前 Python/系统的 {name} 版本"
+                    continue
+                fname, wheel_url, ver = pick
+                dest = os.path.join(wheels, fname)
+                part_path = dest + ".part"
+                progress_emit("dependency",
+                              f"正在从{sname}下载配套依赖 {name} {ver}", percent=pct)
+                saved_path = _download_small_wheel(wheel_url, dest, fname, sname, pct)
+                break
+            except _DownloadCanceled:
+                raise
+            except Exception as exc:
+                last_err = f"{sname}：{str(exc)[:80]}"
+                try:
+                    if part_path and os.path.exists(part_path):
+                        os.remove(part_path)
+                except OSError:
+                    pass
+                continue
+        if CANCEL_EVENT.is_set():
+            return False
+        if not saved_path:
+            progress_emit("dependency",
+                          f"配套依赖 {name} 直链下载失败（{last_err or '所有下载源均不可用'}），改用 pip 方式兜底",
+                          percent=89)
+            return False
+        completed += 1
+        # 递归读取该 wheel 的运行期依赖（marker 过滤、torch/nvidia 等排除逻辑与主依赖一致）
+        sub_deps = read_wheel_runtime_reqs(saved_path)
+        if sub_deps:
+            for sub in sub_deps:
+                sub_name, _ = _req_name_and_spec(sub)
+                if sub_name and sub_name not in queued:
+                    pending.append(sub)
+        progress_emit("dependency",
+                      f"配套依赖 {name} 下载完成（{completed} 个小型组件就绪）",
+                      percent=min(97, 89 + completed))
+    return True
 
 
 def install_cuda_torch(gpu_name):
@@ -926,42 +1648,87 @@ def install_cuda_torch(gpu_name):
         got = download_cuda_wheel(wheels, pbase=0, pspan=0.9)
         if CANCEL_EVENT.is_set() or got is None:
             if not CANCEL_EVENT.is_set():
-                progress_emit("dependency", "CUDA 版 PyTorch 下载失败，请检查网络后重试（已下载部分会保留，重试可断点续传）", percent=0)
+                progress_emit("dependency", "CUDA 版 PyTorch 下载失败，请检查网络后重试（已下载部分会保留，重试可断点续传）" + _log_hint(), percent=0)
             else:
                 progress_emit("dependency", "已取消下载（已下载部分会保留，重试可断点续传）", percent=0)
             return False
         wheel_path, wheel_fname, torch_ver = got
-        progress_emit("dependency", "主安装包下载完成，正在下载配套依赖", percent=89)
 
-        # 小依赖（filelock/typing-extensions/sympy/networkx/jinja2/fsspec 等纯 Python 包）走国内 PyPI 镜像。
-        # 这些依赖通常已随系统里的 CPU 版 torch 装在全局 site-packages，运行时可直接复用，
-        # 因此此步「尽力而为」：失败不阻断，安装阶段改用 --no-deps 只装 torch 主包。
+        # 配套小依赖（filelock/typing-extensions/sympy/networkx/jinja2/fsspec 等纯 Python 包）：
+        # 直接从已下完的本地 torch wheel 的 METADATA 里读 Requires-Dist，只下载这些小包。
+        # 切勿把 torch 本身放进 pip download 的 spec——pip 为确认版本会先抓取 PyPI 上 torch
+        # 几十至上百 MB 的巨型索引页，抓取期间 stdout 长时间静默，表现为一直卡在
+        # 「正在连接/解析下载源」直至空闲超时，且每个镜像都会重抓一遍。
+        deps = read_wheel_runtime_reqs(wheel_path)
+        if not deps:
+            deps = list(_FALLBACK_TORCH_DEPS)
+        dep_names = [re.split(r"[<>=!~;\[ \t]", d, 1)[0] for d in deps]
+        progress_emit("dependency",
+                      "主安装包下载完成，正在下载配套依赖（" + "、".join(dep_names) + " 等小型组件）",
+                      percent=89)
         spec = f"torch=={torch_ver}"
-        dep_base = [sys.executable, "-m", "pip", "download", "--no-input",
-                    "--disable-pip-version-check", "--timeout", "30", "--retries", "3",
-                    "--prefer-binary", "--progress-bar", "on",
-                    "--dest", wheels, "--find-links", wheels, spec]
-        pypi_sources = ["https://pypi.tuna.tsinghua.edu.cn/simple",
-                        "https://mirrors.aliyun.com/pypi/simple/",
-                        "https://pypi.mirrors.ustc.edu.cn/simple"]
+        # 高校镜像（南大/上交）与主 wheel 下载同源，校园网等环境下往往只有它们可达，一并纳入测速
+        all_pypi_sources = [("清华 PyPI 镜像", "https://pypi.tuna.tsinghua.edu.cn/simple"),
+                            ("南京大学 PyPI 镜像", "https://mirrors.nju.edu.cn/pypi/web/simple"),
+                            ("上海交大 PyPI 镜像", "https://mirror.sjtu.edu.cn/pypi/web/simple"),
+                            ("阿里云 PyPI 镜像", "https://mirrors.aliyun.com/pypi/simple/"),
+                            ("中科大 PyPI 镜像", "https://pypi.mirrors.ustc.edu.cn/simple"),
+                            ("华为云 PyPI 镜像", "https://repo.huaweicloud.com/pypi/simple/"),
+                            ("腾讯云 PyPI 镜像", "https://mirrors.cloud.tencent.com/pypi/simple/")]
+        # 先用并发 urllib 探针给镜像测速（pip 自身在连接建立前长时间零输出，无法区分卡死与慢），
+        # 只把可达镜像交给后续下载，整体最多等待约 8 秒
+        reachable = probe_pypi_mirrors(all_pypi_sources)
+        pypi_sources = reachable or all_pypi_sources
+
         deps_ok = False
         dep_tail = ""
-        for index, idx_url in enumerate(pypi_sources):
-            if CANCEL_EVENT.is_set():
-                progress_emit("dependency", "已取消下载", percent=0)
-                return False
-            if index:
-                progress_emit("dependency", f"正在切换 PyPI 镜像重试（{index + 1}/{len(pypi_sources)}）", percent=90)
-            dep_code, dep_output = run_pip_with_progress(
-                dep_base + ["--index-url", idx_url], "正在下载 PyTorch 配套依赖",
-                network=True, idle_timeout=60, pbase=90, pspan=0.08, mode="single")
-            if dep_code == 130:
-                progress_emit("dependency", "已取消下载", percent=0)
-                return False
-            if dep_code == 0:
-                deps_ok = True
-                break
-            dep_tail = "；".join(l.strip() for l in dep_output.splitlines() if l.strip())[-200:]
+        # 首选 urllib 直链下载：与主 wheel 同一传输通道（探针刚验证过可达性/速度），
+        # 逐文件镜像故障转移、进度实时可见，彻底避开 pip 在线阶段每源静默耗满超时
+        # （--timeout×--retries ≈ 60 秒）才切换、走完全部源才放弃的问题
+        if not CANCEL_EVENT.is_set():
+            deps_ok = download_torch_deps(deps, wheels, pypi_sources)
+        if CANCEL_EVENT.is_set():
+            progress_emit("dependency", "已取消下载", percent=0)
+            return False
+
+        if not deps_ok:
+            # 兜底：urllib 直链失败时再走原 pip 在线下载（成功与否都不影响主 wheel 续传）。
+            # 把 pip 的临时目录重定向到 wheels 下：--no-cache-dir 时 pip 仍会把下载中的分片写到
+            # %TEMP%\\pip-xxxx，只有落盘字节增长能证明慢网络下它仍在传输（保活扫描依赖这个目录）
+            dep_tmp = os.path.join(wheels, ".tmp")
+            shutil.rmtree(dep_tmp, ignore_errors=True)
+            os.makedirs(dep_tmp, exist_ok=True)
+            dep_env = {"TMP": dep_tmp, "TEMP": dep_tmp, "TMPDIR": dep_tmp}
+            # 不带 --find-links：本步只下小依赖，避免 pip 扫描 2.6GB 本地 wheel；递归依赖（mpmath/MarkupSafe）由 pip 自动补全。
+            # --no-cache-dir 关键：pip 全局 HTTP 缓存被其他 pip 进程（孤儿 gpu-setup、ASR 依赖安装器、用户手动 pip）
+            # 持锁时，pip 会静默阻塞在缓存锁上并最终秒退/超时，UI 表现为一直「正在连接/解析下载源」；
+            # 这些纯 Python 小包总共约 10MB，不用缓存代价可忽略。
+            dep_base = [sys.executable, "-m", "pip", "download", "--no-input",
+                        "--disable-pip-version-check", "--no-cache-dir",
+                        "--timeout", "20", "--retries", "2",
+                        "--prefer-binary", "--progress-bar", "on",
+                        "--dest", wheels]
+            for index, (source_name, idx_url) in enumerate(pypi_sources):
+                if CANCEL_EVENT.is_set():
+                    progress_emit("dependency", "已取消下载", percent=0)
+                    return False
+                # 每个源重试前清空临时分片目录，避免上个源的残留分片干扰增长判定
+                shutil.rmtree(dep_tmp, ignore_errors=True)
+                os.makedirs(dep_tmp, exist_ok=True)
+                if index:
+                    progress_emit("dependency",
+                                  f"正在切换到{source_name}重试（{index + 1}/{len(pypi_sources)}）", percent=90)
+                dep_code, dep_output = run_pip_with_progress(
+                    dep_base + ["--index-url", idx_url, *deps], "正在下载 PyTorch 配套依赖",
+                    network=True, idle_timeout=60, pbase=90, pspan=0.08,
+                    mode="download", watch_dir=dep_tmp, extra_env=dep_env)
+                if dep_code == 130:
+                    progress_emit("dependency", "已取消下载", percent=0)
+                    return False
+                if dep_code == 0:
+                    deps_ok = True
+                    break
+                dep_tail = "；".join(l.strip() for l in dep_output.splitlines() if l.strip())[-200:]
         if deps_ok:
             progress_emit("dependency", "阶段 1/2 · 下载完成 100%", percent=100)
         else:
@@ -973,27 +1740,91 @@ def install_cuda_torch(gpu_name):
 
         # ---------- 阶段二：安装 ----------
         set_setup_phase("install")
-        progress_emit("dependency", "阶段 2/2 · 正在安装到 lib 目录", percent=0)
-        inst = [sys.executable, "-m", "pip", "install", "--no-input", "--disable-pip-version-check",
-                "--no-index", "--find-links", wheels, "--prefer-binary", "--progress-bar", "on",
-                "--ignore-installed", "--upgrade"]
-        if not deps_ok:
-            # wheels 中依赖不全时 --no-index 无法解析依赖，改为只装 torch 主包；
-            # filelock/sympy 等纯 Python 依赖运行时从全局 site-packages 复用
-            inst.append("--no-deps")
-        if target:
-            inst += ["--target", target]
-        inst += [spec]
-        code, output = run_pip_with_progress(
-            inst, "正在安装 CUDA 版 PyTorch 到 lib 目录",
-            network=False, idle_timeout=300, pbase=0, pspan=1.0, mode="install")
-        if CANCEL_EVENT.is_set() or code == 130:
+        progress_emit("dependency", "阶段 2/2 · 正在解包并安装到 lib 目录", percent=0)
+        # 首选「多线程直解压」快速安装：pip 装大 wheel 实际要走 解压到 pip-unpack（4.2GB 写）
+        # →全量复制到 pip-target 暂存（再 4.2GB 写，数万小文件逐个被杀软扫描）→提交 --target
+        # 三遍写盘，并串行编译数千个 pyc；2.6GB cu126 wheel 真机实测约 176 秒。
+        # 直解压只写一遍、inflate 与落盘多线程并行（还能重叠杀软扫描等待），同机实测约 38 秒，
+        # 且支持取消后断点续装。任何异常都自动回退到下方原 pip 流程，可靠性不变。
+        inst_base = target or os.path.dirname(wheels) or tempfile.gettempdir()
+        install_target = target or inst_base
+        # deps_ok 时 wheels 目录里有主 wheel + 全部配套依赖；按分发名/版本/ABI 标签精选后一起直解压。
+        # 依赖不全（deps_ok=False）时只装主 wheel，纯 Python 依赖运行时从全局 site-packages 复用
+        # packaging 不可用（无法按版本/ABI 精选依赖）时不在快通道里冒险，整体走 pip 兜底
+        install_wheels = _select_local_wheels(wheel_path, wheels) if deps_ok else [wheel_path]
+        skip_fast = bool(deps_ok and not install_wheels)
+        # 预期落盘总量：所有待装 wheel 成员未压缩体积之和（直解压只写一遍盘）
+        expected_total = 0
+        try:
+            for wp in install_wheels:
+                with zipfile.ZipFile(wp) as z:
+                    expected_total += sum(info.file_size for info in z.infolist() if not info.is_dir())
+        except Exception:
+            expected_total = 0
+        # 磁盘空间预检：直解压只需解压后体积一份 + 少量余量（旧 pip 方案需 wheel 体积 3 倍）；
+        # 空间不足时解包中途磁盘写满，UI 停在高百分比后失败且报错晦涩，提前拦下
+        try:
+            free = shutil.disk_usage(inst_base).free
+            need = (expected_total + 300 * 1024 * 1024) if expected_total else os.path.getsize(wheel_path) * 2
+            if free < need:
+                progress_emit("dependency",
+                              f"磁盘空间不足：{inst_base} 所在盘仅剩 {_format_bytes(free)}，"
+                              f"安装至少需要 {_format_bytes(need)}，请清理磁盘后重试",
+                              percent=0)
+                return False
+        except OSError:
+            pass
+        if skip_fast:
+            fast = False
+        else:
+            fast = direct_install_wheels(install_wheels, install_target,
+                                         "正在解包并安装 CUDA 版 PyTorch",
+                                         pbase=0, pspan=0.98)
+        if fast == 130 or CANCEL_EVENT.is_set():
             progress_emit("dependency", "已取消安装", percent=0)
             return False
-        if code != 0:
-            tail = "；".join(l.strip() for l in output.splitlines() if l.strip())[-220:]
-            progress_emit("dependency", "CUDA 依赖安装失败" + (f"：{tail}" if tail else ""), percent=0)
-            return False
+        if fast is not True:
+            # ===== 兜底：原 pip 标准安装流程（历史修复全部保留）=====
+            # pip 安装 wheel 前会先在 %TEMP% 解压（pip-unpack）并把全部文件暂存到 pip-target
+            # （torch cu126 峰值约 4.1GB），全部就绪后才提交到 --target。默认临时目录在 C 盘：
+            # ① 解压/暂存期间最终 target 零字节、管道下 stdout 零输出，只扫 target 会在慢盘/杀软
+            #    扫描时误判空闲杀掉 pip（UI 永远停在 99%）；② 跨卷提交还要复制 4GB；③ 占 C 盘。
+            # 把 TMP 重定向到 target 同盘短目录：暂存字节纳入保活扫描，同盘提交退化为原子改名。
+            progress_emit("dependency", "正在使用标准安装流程继续安装（速度较慢但同样可靠）", percent=1)
+            inst_tmp = os.path.join(inst_base, "_it")
+            shutil.rmtree(inst_tmp, ignore_errors=True)
+            os.makedirs(inst_tmp, exist_ok=True)
+            inst_env = {"TMP": inst_tmp, "TEMP": inst_tmp, "TMPDIR": inst_tmp}
+            inst = [sys.executable, "-m", "pip", "install", "--no-input", "--disable-pip-version-check",
+                    "--no-index", "--find-links", wheels, "--prefer-binary", "--progress-bar", "on",
+                    "--ignore-installed", "--upgrade", "--no-cache-dir"]
+            if not deps_ok:
+                # wheels 中依赖不全时 --no-index 无法解析依赖，改为只装 torch 主包；
+                # filelock/sympy 等纯 Python 依赖运行时从全局 site-packages 复用
+                inst.append("--no-deps")
+            if target:
+                inst += ["--target", target]
+            inst += [spec]
+            # 同时监控最终目录与暂存目录；_gpu_wheels 是 2.5GB 下载缓存、_it 是暂存目录本身，
+            # 都不计入「最终安装目录」的扫描字节（_it 由 watch 列表单独统计，避免同一份字节算两遍）
+            inst_watch = [p for p in (target, inst_tmp) if p]
+            try:
+                code, output = run_pip_with_progress(
+                    inst, "正在解包并安装 CUDA 版 PyTorch",
+                    network=False, idle_timeout=600, pbase=0, pspan=1.0,
+                    mode="install", watch_dir=inst_watch,
+                    watch_skip=("_gpu_wheels", os.path.basename(inst_tmp)), extra_env=inst_env,
+                    expected_total=expected_total)
+            finally:
+                # 成功/失败/取消都清掉暂存目录；下次进入时开头的 rmtree 也会兜底
+                shutil.rmtree(inst_tmp, ignore_errors=True)
+            if CANCEL_EVENT.is_set() or code == 130:
+                progress_emit("dependency", "已取消安装", percent=0)
+                return False
+            if code != 0:
+                tail = "；".join(l.strip() for l in output.splitlines() if l.strip())[-220:]
+                progress_emit("dependency", "CUDA 依赖安装失败" + (f"：{tail}" if tail else "") + _log_hint(), percent=0)
+                return False
         progress_emit("dependency", "阶段 2/2 · 安装完成 100%", percent=100)
 
         cuda_ok, why = torch_cuda_ok(gpu_name=gpu_name)
@@ -1001,10 +1832,10 @@ def install_cuda_torch(gpu_name):
             # 成功后才清理 wheels；失败/取消时保留主 wheel 与 .part，下次进入可断点续传、免重下 2.6GB
             shutil.rmtree(wheels, ignore_errors=True)
             return True
-        progress_emit("dependency", f"安装完成但 CUDA 仍不可用：{why}", percent=100)
+        progress_emit("dependency", f"安装完成但 CUDA 仍不可用：{why}{_log_hint()}", percent=100)
         return False
     except Exception as exc:
-        progress_emit("dependency", f"安装流程异常：{exc}（已下载部分会保留，重试可断点续传）", percent=0)
+        progress_emit("dependency", f"安装流程异常：{exc}（已下载部分会保留，重试可断点续传）{_log_hint()}", percent=0)
         return False
 
 
@@ -1041,13 +1872,50 @@ def prepare_cuda_environment(device_pref):
     return gpu_name, False
 
 
+def detect_defender_exclusion(lib_dir):
+    """检测 Windows Defender 实时防护状态与 lib 目录排除情况。
+    返回 (rtp_enabled, excluded)。Defender 不可用（第三方杀软接管/服务未装）返回 (False, True)，
+    此时排除建议不适用，需用户在第三方杀软中手动配置。"""
+    if os.name != "nt" or not lib_dir:
+        return False, True
+    try:
+        out = subprocess.check_output(
+            ["powershell", "-NoProfile", "-Command",
+             "(Get-MpComputerStatus).RealTimeProtectionEnabled; (Get-MpPreference).ExclusionPath -join ';'"],
+            text=True, timeout=30, stderr=subprocess.DEVNULL)
+        lines = [l.strip() for l in out.splitlines() if l.strip()]
+        rtp = lines[0].lower() == "true" if lines else False
+        paths = lines[1] if len(lines) > 1 else ""
+        norm = os.path.normcase(os.path.normpath(lib_dir))
+        for p in paths.split(";"):
+            p = p.strip()
+            if not p:
+                continue
+            ep = os.path.normcase(os.path.normpath(p))
+            # lib 已被排除，或被更高层目录的排除覆盖
+            if norm == ep or norm.startswith(ep + os.sep):
+                return rtp, True
+        return rtp, False
+    except Exception:
+        return False, True
+
+
 def run_gpu_setup():
     """设置中选中「GPU + CPU 双模式」后独立运行的依赖安装流程。
     依次经历 检测(check) → 下载(download) → 安装(install) 三个阶段，
     通过 gpu-setup 事件回报进度，支持用户经 stdin 取消。"""
     global SETUP_MODE
     SETUP_MODE = True
+    _open_setup_log()
     threading.Thread(target=cancel_watcher, daemon=True).start()
+    # Defender 排除：实时防护开启且 lib 未被排除时，由主进程收到 suggest_exclude 后自动
+    # 拉起 UAC 添加排除（用户确认即可，无需点界面按钮）。
+    # 大 wheel 被 Defender 逐文件拦截是「准备耗时 1-3 分钟 + 解包写入极慢」的最常见原因；
+    # 排除是对安全软件的正规配置（用户经 UAC 明确确认），不是绕过扫描
+    rtp, excluded = detect_defender_exclusion(LIB_DIR)
+    if rtp and not excluded:
+        emit("gpu-setup", phase="progress", percent=2, suggest_exclude=True,
+             message="检测到 Windows Defender 实时防护未排除软件目录，即将自动请求管理员权限添加排除（可大幅提升安装速度）")
     set_setup_phase("check")
     progress_emit("dependency", "正在检测显卡与 CUDA 环境", percent=2)
     if CANCEL_EVENT.is_set():
@@ -1071,7 +1939,8 @@ def run_gpu_setup():
     if ok:
         emit("gpu-setup", phase="ready", percent=100, message="CUDA 依赖安装完成，GPU + CPU 双模式已就绪")
         return 0
-    emit("gpu-setup", phase="error", percent=0, message="CUDA 依赖安装失败，将使用 CPU 识别")
+    emit("gpu-setup", phase="error", percent=0,
+         message="CUDA 依赖安装失败，将使用 CPU 识别" + _log_hint())
     return 4
 
 

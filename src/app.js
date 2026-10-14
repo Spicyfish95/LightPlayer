@@ -861,6 +861,8 @@ $('#gpuSetupCancel').onclick = () => {
 const GPU_PHASE_LABEL = { check: '检测环境', download: '下载依赖（1/2）', install: '安装依赖（2/2）' };
 window.lightPlayer.onGpuSetupEvent(data => {
   if (!data || data.kind !== 'gpu-setup' || gpuSetupDone) return;
+  // 主进程自动拉 UAC 添加 Defender 排除的过程消息：只更新文案，不动阶段标签与进度条
+  if (data.message_only) { if (data.message) $('#gpuSetupMessage').textContent = data.message; return; }
   if (data.percent != null) { $('#gpuSetupBar').style.width = data.percent + '%'; $('#gpuSetupPercent').textContent = data.percent + '%'; }
   if (data.message) $('#gpuSetupMessage').textContent = data.message;
   const phase = data.phase || 'progress';
