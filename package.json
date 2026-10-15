@@ -14,6 +14,7 @@
   "build": {
     "appId": "com.lightplayer.desktop",
     "productName": "LightPlayer",
+    "npmRebuild": false,
     "directories": {
       "output": "dist"
     },
@@ -23,7 +24,9 @@
       "package.json"
     ],
     "asarUnpack": [
-      "src/asr_worker.py"
+      "src/asr/**",
+      "node_modules/sherpa-onnx-node/**",
+      "node_modules/sherpa-onnx-win-x64/**"
     ],
     "win": {
       "icon": "build/icon.ico",
@@ -41,5 +44,8 @@
   "devDependencies": {
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "sherpa-onnx-node": "^1.13.8"
   }
 }

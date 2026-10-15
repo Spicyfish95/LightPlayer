@@ -1,8 +1,9 @@
-const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, utilityProcess } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { spawn, spawnSync } = require('child_process');
-let asrProcess = null;   // 常驻 ASR daemon（模型只加载一次，会话经 stdin 控制）
+const { spawnSync } = require('child_process');
+const { resolveModelDir } = require('./asr/models');
+let asrProcess = null;   // 常驻 ASR worker（sherpa-onnx，模型只加载一次，会话经消息控制）
 let asrNextSid = 1;      // 会话自增 id（渲染端据此过滤旧会话残留事件）
 const asrSidWaiters = new Map();   // sid → resolve()，等待某会话停止/结束
 let asrActiveSid = 0;    // 当前运行中的会话 sid（0 表示空闲）
@@ -22,75 +23,23 @@ function readHwAccel() {
 if (!readHwAccel()) app.disableHardwareAcceleration();
 
 function resolveAsrWorker() {
-  // 开发模式：直接用源码路径；打包模式：优先 app.asar.unpacked，
-  // 缺失时从 asar 内复制到 userData 再执行（Python 无法读取 asar 内的文件）
-  const inAsar = path.join(__dirname, 'asr_worker.py');
-  if (!app.isPackaged) return inAsar;
-  const unpacked = path.join(process.resourcesPath, 'app.asar.unpacked', 'src', 'asr_worker.py');
-  if (fs.existsSync(unpacked)) return unpacked;
-  try {
-    const target = path.join(app.getPath('userData'), 'asr_worker.py');
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, fs.readFileSync(inAsar));
-    return target;
-  } catch (_) { return unpacked; }
+  // 开发模式：源码路径；打包模式：worker 与 sherpa-onnx 原生模块经 asarUnpack 解包到 app.asar.unpacked
+  if (!app.isPackaged) return path.join(__dirname, 'asr', 'asr_worker.js');
+  return path.join(process.resourcesPath, 'app.asar.unpacked', 'src', 'asr', 'asr_worker.js');
 }
 
-// GPU 相关依赖的安装目录：软件所在目录下的 lib（开发模式即项目根目录/lib）
-function resolveLibDir() {
-  const base = app.isPackaged ? path.dirname(app.getPath('exe')) : app.getAppPath();
-  return path.join(base, 'lib');
-}
-
-let _cachedPython = null;
-function findPython() {
-  if (_cachedPython) return _cachedPython;
-  // Windows：优先 py 启动器指定小版本，逐级回退到 PATH 中的 python
-  const candidates = process.platform === 'win32'
-    ? [['py', ['-3.12']], ['py', ['-3.13']], ['py', ['-3.11']], ['py', ['-3']], ['python', []], ['python3', []]]
-    : [['python3', []], ['python', []]];
-  for (const [cmd, pre] of candidates) {
-    try {
-      const probe = spawnSync(cmd, [...pre, '--version'], { windowsHide: true, encoding: 'utf8', timeout: 15000 });
-      if (probe.status === 0 && `${probe.stdout || ''}${probe.stderr || ''}`.includes('Python')) { _cachedPython = [cmd, pre]; return _cachedPython; }
-    } catch (_) {}
-  }
-  return null;
-}
-
-// 结束子进程的整棵进程树（Windows 下 .kill() 只终止 python.exe，ffmpeg 等孙进程可能残留）
+// 结束子进程的整棵进程树（Windows 下 utilityProcess.kill() 不保证带走 ffmpeg 孙进程）
 function killProcessTree(proc) {
-  if (!proc || proc.pid == null || proc.exitCode !== null) return;
+  if (!proc || proc.pid == null) return;
   try {
     if (process.platform === 'win32') {
       spawnSync('taskkill', ['/F', '/T', '/PID', String(proc.pid)], { windowsHide: true });
     } else {
-      try { process.kill(-proc.pid, 'SIGKILL'); } catch (_) { proc.kill(); }
+      try { proc.kill(); } catch (_) {}
     }
   } catch (_) {
     try { proc.kill(); } catch (_) {}
   }
-}
-
-// 回收遗留的 ASR 视频识别 worker（UI 已关但孤儿 Python 仍在每 10 秒重写字幕缓存，导致缓存删不掉）。
-// 视频识别 worker：无条件清理。
-// --gpu-setup 安装进程：仅当其父进程已不存在（应用上次崩溃/强杀遗留）时才清理——
-// 这种孤儿会继续持有 pip 全局 HTTP 缓存锁/下载目录，与用户重新触发的安装并发，
-// 表现为 pip 静默停在「正在连接/解析下载源」直至超时；父进程仍存活的 gpu-setup 属正常安装，绝不动。
-function killOrphanAsrWorkers() {
-  try {
-    if (process.platform === 'win32') {
-      spawnSync('powershell', ['-NoProfile', '-Command',
-        "$alive = @{}; Get-Process -ErrorAction SilentlyContinue | ForEach-Object { $alive[[int]$_.Id] = $true }; " +
-        "Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR Name='pythonw.exe'\" | " +
-        "Where-Object { $_.CommandLine -like '*asr_worker*' } | ForEach-Object { " +
-        "  if ($_.CommandLine -notlike '*--gpu-setup*' -or -not $alive.ContainsKey([int]$_.ParentProcessId)) { " +
-        "    taskkill /F /T /PID $_.ProcessId 2>`$null | Out-Null } }"],
-        { windowsHide: true, timeout: 20000 });
-    } else {
-      spawnSync('pkill', ['-f', 'asr_worker.py'], { timeout: 10000 });
-    }
-  } catch (_) {}
 }
 
 function createWindow() {
@@ -138,10 +87,6 @@ app.whenReady().then(() => {
     const result = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: '字幕文件', extensions: ['srt','vtt','ass','ssa','txt'] }] });
     if (result.canceled || !result.filePaths[0]) return null;
     return { path: result.filePaths[0], content: fs.readFileSync(result.filePaths[0], 'utf8') };
-  });
-  ipcMain.handle('dialog:open-model-directory', async () => {
-    const result = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
-    return result.canceled ? null : result.filePaths[0];
   });
   const captionCachePath = video => video + '.lightplayer-subs.json';
   ipcMain.handle('captions:read-cache', (event, video) => {
@@ -211,13 +156,10 @@ app.whenReady().then(() => {
       return { ok: true, path: result.filePath };
     } catch (e) { return { ok: false, message: e.message }; }
   });
-  // 向常驻 daemon 写一行命令
+  // 向常驻 worker 发一条消息
   function asrSend(obj) {
     try {
-      if (asrProcess && asrProcess.stdin && !asrProcess.killed && asrProcess.exitCode === null) {
-        asrProcess.stdin.write(JSON.stringify(obj) + '\n');
-        return true;
-      }
+      if (asrProcess && !asrProcess.killed) { asrProcess.postMessage(obj); return true; }
     } catch (_) {}
     return false;
   }
@@ -230,46 +172,43 @@ app.whenReady().then(() => {
       setTimeout(done, timeoutMs);
     });
   }
-  // 停止当前会话（不杀常驻进程），等其落盘并真正停下来，供清除缓存前调用
+  // 停止当前会话（不杀常驻 worker），等其落盘并真正停下来，供清除缓存前调用
   async function asrStopSession() {
     if (!asrProcess || !asrActiveSid) return;
     const sid = asrActiveSid;
     asrSend({ cmd: 'stop', sid });
     await waitSidSettled(sid);
   }
-  // 懒启动常驻 daemon；模型在首次 start 时于 daemon 内加载，事件全程带 sid 透传
+  // 懒启动常驻 worker；模型在首次 start 时于 worker 内加载，事件全程带 sid 透传
   function ensureAsrDaemon(sender) {
     if (asrProcess) return true;
     const worker = resolveAsrWorker();
-    if (!fs.existsSync(worker)) { sender.send('asr:event', { kind: 'error', message: '找不到 ASR 工作进程文件：' + worker }); return false; }
-    const found = findPython();
-    if (!found) { sender.send('asr:event', { kind: 'error', message: '未找到可用的 Python 3。请安装 Python 3.10+（Windows 建议用官方安装器并勾选 py 启动器）。' }); return false; }
-    const [python, pythonPre] = found;
-    const proc = spawn(python, [...pythonPre, worker, '--daemon', '--lib-dir', resolveLibDir()],
-      { windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' } });
+    if (!fs.existsSync(worker)) { sender.send('asr:event', { kind: 'error', message: '找不到识别引擎文件：' + worker }); return false; }
+    let proc;
+    try {
+      proc = utilityProcess.fork(worker, [], { stdio: ['ignore', 'ignore', 'pipe'] });
+    } catch (err) {
+      sender.send('asr:event', { kind: 'error', message: `无法启动本地识别引擎：${err.message}` });
+      return false;
+    }
     asrProcess = proc;
-    let buffer = '';
     let stderrTail = '';
-    proc.stdout.on('data', chunk => {
-      buffer += chunk.toString();
-      const lines = buffer.split(/\r?\n/); buffer = lines.pop();
-      for (const line of lines) {
-        let d;
-        try { d = JSON.parse(line); } catch (_) { continue; }
-        if (d && (d.kind === 'stopped' || d.kind === 'done') && d.sid) {
-          if (asrActiveSid === d.sid) asrActiveSid = 0;
-          const w = asrSidWaiters.get(d.sid); if (w) w();
-        }
-        if (d && d.kind === 'error' && d.sid && asrActiveSid === d.sid) {
-          asrActiveSid = 0;
-          const w = asrSidWaiters.get(d.sid); if (w) w();
-        }
-        if (!sender.isDestroyed()) sender.send('asr:event', d);
+    proc.on('message', d => {
+      if (!d || typeof d !== 'object') return;
+      if ((d.kind === 'stopped' || d.kind === 'done') && d.sid) {
+        if (asrActiveSid === d.sid) asrActiveSid = 0;
+        const w = asrSidWaiters.get(d.sid); if (w) w();
       }
+      if (d.kind === 'error' && d.sid && asrActiveSid === d.sid) {
+        asrActiveSid = 0;
+        const w = asrSidWaiters.get(d.sid); if (w) w();
+      }
+      if (!sender.isDestroyed()) sender.send('asr:event', d);
     });
-    proc.stderr.on('data', chunk => { stderrTail = (stderrTail + chunk.toString()).slice(-800); });
-    proc.on('error', err => { if (!sender.isDestroyed()) sender.send('asr:event', { kind: 'error', message: `无法启动 Python ASR：${err.message}` }); });
-    proc.on('close', code => {
+    if (proc.stderr) {
+      proc.stderr.on('data', chunk => { stderrTail = (stderrTail + chunk.toString()).slice(-800); });
+    }
+    proc.on('exit', code => {
       const exitedSid = asrActiveSid;
       asrProcess = null; asrActiveSid = 0;
       for (const w of asrSidWaiters.values()) w();
@@ -281,12 +220,12 @@ app.whenReady().then(() => {
     });
     return true;
   }
-  // 应用退出：优雅关闭 daemon，超时兜底进程树终止
+  // 应用退出：优雅关闭 worker，超时兜底进程树终止
   function shutdownAsrDaemon() {
     if (!asrProcess) return;
     const p = asrProcess;
     asrProcess = null; asrActiveSid = 0;
-    try { if (p.stdin && !p.killed) p.stdin.write(JSON.stringify({ cmd: 'shutdown' }) + '\n'); } catch (_) {}
+    try { p.postMessage({ cmd: 'shutdown' }); } catch (_) {}
     setTimeout(() => killProcessTree(p), 700);
   }
 
@@ -298,121 +237,28 @@ app.whenReady().then(() => {
     const ok = asrSend({
       cmd: 'start', sid,
       video: options.video,
-      model: options.modelPath || '',
-      model_kind: options.modelKind || 'qwen',
+      modelDir: resolveModelDir(app.isPackaged, app.getAppPath(), process.resourcesPath),
       duration: Number(options.duration) || 0,
       start: Number(options.start) || 0,
-      device: ['auto', 'cpu'].includes(options.device) ? options.device : 'cpu'
+      chunk: Number(options.chunk) || 4
     });
     return { ok, sid };
   });
-  // 关闭字幕：仅通知会话停止，常驻 daemon 与模型保留，下次开启零冷启动
+  // 关闭字幕：仅通知会话停止，常驻 worker 与模型保留，下次开启零冷启动
   ipcMain.on('asr:stop', () => { asrStopSession(); });
   ipcMain.on('asr:seek', (event, payload) => {
     if (!asrProcess) return;
     asrSend({ cmd: payload && payload.seek ? 'seek' : 'pos', sid: asrActiveSid || undefined,
               start: Number(payload && payload.start) || 0, rate: Number(payload && payload.rate) || 1 });
   });
-  // GPU 依赖安装：设置里选中「GPU + CPU 双模式」后独立启动，与实时字幕相互独立
-  let gpuSetupProcess = null;
-  const stopGpuSetup = () => { if (gpuSetupProcess) { killProcessTree(gpuSetupProcess); gpuSetupProcess = null; } };
-  ipcMain.handle('gpu:setup:start', async (event) => {
-    stopGpuSetup();
-    const worker = resolveAsrWorker();
-    if (!fs.existsSync(worker)) return { ok: false, message: '找不到 ASR 工作进程文件：' + worker };
-    const found = findPython();
-    if (!found) return { ok: false, message: '未找到可用的 Python 3。请安装 Python 3.10+（Windows 建议用官方安装器并勾选 py 启动器）。' };
-    const [python, pythonPre] = found;
-    const sender = event.sender;
-    const safeSend = data => { if (!sender.isDestroyed()) sender.send('gpu:setup:event', data); };
-    const args = [worker, '--gpu-setup', '--lib-dir', resolveLibDir()];
-    const proc = spawn(python, [...pythonPre, ...args], { windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' } });
-    gpuSetupProcess = proc;
-    let buffer = '';
-    let stderrTail = '';
-    let excludeRequested = false;
-    proc.stdout.on('data', chunk => {
-      if (proc !== gpuSetupProcess) return;
-      buffer += chunk.toString();
-      const lines = buffer.split(/\r?\n/); buffer = lines.pop();
-      for (const line of lines) {
-        let evt = null;
-        try { evt = JSON.parse(line); } catch (_) {}
-        if (!evt) continue;
-        safeSend(evt);
-        // worker 检测到 Defender 实时防护开启且软件目录未排除：自动弹 UAC 添加，无需用户点按钮
-        if (evt.suggest_exclude && !excludeRequested) {
-          excludeRequested = true;
-          requestDefenderExclusion(safeSend);
-        }
-      }
-    });
-    proc.stderr.on('data', chunk => {
-      if (proc !== gpuSetupProcess) return;
-      stderrTail = (stderrTail + chunk.toString()).slice(-800);
-    });
-    proc.on('error', err => safeSend({ kind: 'gpu-setup', phase: 'error', message: `无法启动 Python：${err.message}` }));
-    proc.on('close', code => {
-      if (proc !== gpuSetupProcess) return;   // 已被取消/替换：不再上报
-      if (buffer.trim()) { try { safeSend(JSON.parse(buffer.trim())); } catch (_) {} }
-      gpuSetupProcess = null;
-      if (code !== 0) {
-        const detail = stderrTail.split(/\r?\n/).map(s => s.trim()).filter(Boolean).slice(-3).join(' | ');
-        safeSend({ kind: 'gpu-setup', phase: 'exit', code, detail: detail.slice(0, 260) });
-      }
-    });
-    return { ok: true };
-  });
-  ipcMain.on('gpu:setup:cancel', () => {
-    const proc = gpuSetupProcess;
-    if (!proc) return;
-    // 先礼貌通知 worker 结束 pip 进程树，超时未退出再强制结束
-    try { proc.stdin.write(JSON.stringify({ cmd: 'cancel' }) + '\n'); } catch (_) {}
-    setTimeout(() => {
-      if (gpuSetupProcess === proc && proc.exitCode === null) {
-        try { spawnSync('taskkill', ['/F', '/T', '/PID', String(proc.pid)], { windowsHide: true }); } catch (_) {}
-      }
-    }, 4000);
-  });
-  // 自动添加 Windows Defender 排除目录：worker 检测到实时防护开启且 lib 未排除时，
-  // 主进程直接拉起 UAC，由用户确认后以管理员权限执行 Add-MpPreference，无需用户在界面点按钮。
-  // 排除软件目录可避免 Defender 对 2.6GB wheel 及解包出的 2 万个文件逐个扫描——这是 GPU 依赖
-  // 安装「准备 1-3 分钟、写入极慢」的最常见原因。这是对安全软件的正规配置（用户经 UAC 明确确认），非绕过。
-  // 不阻塞安装流程：用户在 UAC 上犹豫/拒绝时下载照常继续，拒绝只提示一次，安装不受影响。
-  const requestDefenderExclusion = async safeSend => {
-    if (process.platform !== 'win32') return;
-    const lib = resolveLibDir();
-    safeSend({ kind: 'gpu-setup', message_only: true,
-               message: '正在请求管理员权限以自动添加 Windows Defender 排除目录（在弹出的 UAC 窗口点击「是」，可大幅提升安装速度）' });
-    const inner = `Add-MpPreference -ExclusionPath "${lib}"`;
-    const cmd = `Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden`
-      + ` -ArgumentList '-NoProfile','-Command','${inner.replace(/'/g, "''")}'`;
-    const code = await new Promise(resolve => {
-      const p = spawn('powershell', ['-NoProfile', '-Command', cmd], { windowsHide: true });
-      p.on('close', c => resolve(c));
-      p.on('error', () => resolve(-1));
-    });
-    if (code === 0) {
-      safeSend({ kind: 'gpu-setup', message_only: true,
-                 message: '已自动添加 Windows Defender 排除目录，正在进行的下载/解包将明显提速' });
-    } else {
-      safeSend({ kind: 'gpu-setup', message_only: true,
-                 message: code === 1
-                   ? '已跳过杀毒软件排除目录（UAC 未确认），安装继续；如后续速度较慢，可重试安装并在 UAC 窗口点击「是」'
-                   : `添加杀毒软件排除目录失败（exit ${code}），安装继续，必要时可手动在杀软设置中添加软件目录` });
-    }
-  };
   ipcMain.on('window:minimize', e => BrowserWindow.fromWebContents(e.sender)?.minimize());
   ipcMain.on('window:maximize', e => { const w = BrowserWindow.fromWebContents(e.sender); w.isMaximized() ? w.unmaximize() : w.maximize(); });
   ipcMain.on('window:close', e => {
     shutdownAsrDaemon();
-    if (gpuSetupProcess) { const p = gpuSetupProcess; gpuSetupProcess = null; killProcessTree(p); }
     BrowserWindow.fromWebContents(e.sender)?.close();
   });
-  // 应用整体退出时兜底关闭常驻 daemon（macOS 等路径）
+  // 应用整体退出时兜底关闭常驻 worker（utilityProcess 子进程也会随父进程退出）
   app.on('before-quit', shutdownAsrDaemon);
-  // 启动时回收上次崩溃/强杀残留的孤儿 ASR worker（含旧版一次性进程 / 崩溃的 daemon），避免其持续重写字幕缓存
-  killOrphanAsrWorkers();
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });

@@ -152,18 +152,13 @@ app.innerHTML = `
     <div class="modal-body">
       <div class="section">
         <div class="subtitle-box">
-          <div class="subtitle-status"><span class="dot" id="asrDot"></span><span id="asrStatus">实时字幕已关闭</span><span class="device-badge" id="deviceBadge">设备：未运行</span><div class="switch" id="asrSwitch"></div></div>
-          <select class="select" id="model"><option value="qwen">Qwen3-ASR-0.6B · 本地识别</option></select>
-          <div class="model-note" id="modelNote">字幕在本机处理，不上传视频。Qwen3-ASR-0.6B 适合中文与多语种视频。</div>
-          <div class="model-path-label">本地模型路径</div>
-          <div class="model-path-row"><input class="model-path" id="modelPath" readonly placeholder="尚未设置模型目录"><button class="btn" id="chooseModelPath">选择</button></div>
-          <button class="btn path-clear" id="clearModelPath">清除路径</button>
+          <div class="subtitle-status"><span class="dot" id="asrDot"></span><span id="asrStatus">实时字幕已关闭</span><span class="device-badge" id="deviceBadge">引擎：未运行</span><div class="switch" id="asrSwitch"></div></div>
+          <div class="model-note" id="modelNote">SenseVoiceSmall（中/英/粤/日/韩）· 本机识别，不上传视频。首次开启自动下载约 240MB 识别模型，之后离线可用。</div>
           <div class="asr-progress hidden" id="asrProgress">
             <div class="asr-progress-head"><span>当前阶段：<b id="asrStageLabel">准备中</b></span><span><span id="asrElapsed"></span><span id="asrPercent">0%</span></span></div>
             <div class="asr-bar"><i id="asrBar"></i></div>
             <div class="asr-steps">
-              <div class="step" id="step-dependency">安装 CPU 依赖</div>
-              <div class="step" id="step-model">加载识别模型</div>
+              <div class="step" id="step-model">准备识别模型</div>
               <div class="step" id="step-audio">分析视频音频</div>
               <div class="step" id="step-transcribe">实时转写</div>
             </div>
@@ -212,33 +207,6 @@ app.innerHTML = `
           <option value="loop">循环播放</option>
         </select></div>
       <div class="settings-row">自动播放上次未播完内容 <div class="switch" id="autoResume"></div></div><div class="settings-row">记住播放进度 <div class="switch" id="resumePlay"></div></div><div class="settings-row">记住播放列表 <div class="switch" id="keepPlaylist"></div></div><div class="settings-row">硬件加速 <div class="switch" id="hwAccel"></div></div></div>
-      <div class="section sec-device"><h3>识别设备</h3>
-        <div class="settings-row">语音识别设备
-          <select class="select" id="deviceSelect" style="width:170px">
-            <option value="cpu">仅 CPU（默认）</option>
-            <option value="auto">GPU + CPU 双模式</option>
-          </select>
-        </div>
-        <p class="hint-text">仅 CPU：只使用 CPU 识别，兼容性最好（默认）。GPU + CPU 双模式：检测到 NVIDIA 显卡时，会把所需的 CUDA 依赖安装到软件目录的 lib 文件夹（若无则自动创建），然后 GPU 与 CPU 同时识别，速度最快；未检测到 NVIDIA 显卡则自动回退 CPU。更改后下次开启实时字幕生效。</p>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- GPU + CPU 双模式：选中后立即下载/安装 CUDA 依赖（可取消，取消后回退 CPU） -->
-<div class="modal-overlay hidden" id="modalGpuSetup" style="z-index:260">
-  <div class="modal modal-sm">
-    <div class="modal-head"><h3>安装 GPU 设备所需依赖</h3></div>
-    <div class="modal-body">
-      <div class="section">
-        <p class="hint-text" id="gpuSetupDesc">首次启用 GPU 加速需下载并安装 CUDA 版 PyTorch（约 2.5GB）。下载过程可能耗时较长，请耐心等待；如需中断可随时取消，将自动回退为 CPU 模式。</p>
-        <div class="asr-progress" style="margin-top:10px">
-          <div class="asr-progress-head"><span>当前状态：<b id="gpuSetupPhase">准备中</b></span><span id="gpuSetupPercent">0%</span></div>
-          <div class="asr-bar"><i id="gpuSetupBar"></i></div>
-          <div class="asr-message" id="gpuSetupMessage"></div>
-        </div>
-      </div>
-      <button class="btn wide danger" id="gpuSetupCancel">取消下载并使用 CPU</button>
     </div>
   </div>
 </div>
@@ -267,7 +235,7 @@ app.innerHTML = `
         <h2 style="margin:0 0 6px;font-size:20px">LightPlayer</h2>
         <p class="hint-text" style="margin:0">轻量、隐私优先的本地播放器<br>版本 1.0.0</p>
       </div>
-      <div class="section"><h3>特性</h3><p class="hint-text">本地视频/音频播放 · 播放列表管理 · 续播记忆<br>Qwen3-ASR 实时字幕（本机识别，不上传视频）<br>字幕样式自定义 · SRT 导出 · GPU + CPU 混合加速</p></div>
+      <div class="section"><h3>特性</h3><p class="hint-text">本地视频/音频播放 · 播放列表管理 · 续播记忆<br>SenseVoice 实时字幕（中/英/粤/日/韩，本机识别，不上传视频）<br>字幕样式自定义 · SRT 导出 · 免安装，无需 Python 与独立显卡</p></div>
     </div>
   </div>
 </div>
@@ -802,90 +770,6 @@ $('#hwAccel').onclick = () => {
 let hotkeysOn = store.get('hotkeys', true);
 $('#hotkeys').classList.toggle('on', hotkeysOn);
 $('#hotkeys').onclick = () => { hotkeysOn = $('#hotkeys').classList.toggle('on'); store.set('hotkeys', hotkeysOn); };
-// 设备默认 CPU；旧的“仅 GPU”配置迁移为双模式
-const savedDeviceRaw = localStorage.getItem('lightplayer-device');
-const savedDevice = savedDeviceRaw === 'gpu' ? 'auto' : (['auto', 'cpu'].includes(savedDeviceRaw) ? savedDeviceRaw : 'cpu');
-$('#deviceSelect').value = savedDevice;
-let gpuSetupRunning = false;   // 依赖安装进行中
-let gpuSetupDone = false;      // 已到达终态（完成/失败/取消），忽略后续退出事件
-
-function setDeviceSelect(value) {
-  localStorage.setItem('lightplayer-device', value);
-  $('#deviceSelect').value = value;
-}
-function closeGpuSetup() { $('#modalGpuSetup').classList.add('hidden'); }
-function resetGpuSetupModal() {
-  $('#gpuSetupBar').style.width = '0%';
-  $('#gpuSetupPercent').textContent = '0%';
-  $('#gpuSetupPhase').textContent = '准备中';
-  $('#gpuSetupMessage').textContent = '';
-  const btn = $('#gpuSetupCancel');
-  btn.disabled = false; btn.dataset.mode = ''; btn.textContent = '取消下载并使用 CPU';
-}
-// 「GPU + CPU 双模式」：选中即开始下载/安装 CUDA 依赖，弹窗显示进度，可取消并回退 CPU
-async function startGpuSetup() {
-  if (gpuSetupRunning) return;
-  gpuSetupRunning = true;
-  gpuSetupDone = false;
-  resetGpuSetupModal();
-  $('#modalGpuSetup').classList.remove('hidden');
-  try {
-    const r = await window.lightPlayer.startGpuSetup();
-    if (r && r.ok === false) {
-      gpuSetupRunning = false; gpuSetupDone = true;
-      setDeviceSelect('cpu');
-      $('#gpuSetupPhase').textContent = '无法开始';
-      $('#gpuSetupMessage').textContent = r.message || '无法启动 GPU 依赖安装';
-      const btn = $('#gpuSetupCancel'); btn.dataset.mode = 'close'; btn.textContent = '关闭';
-    }
-  } catch (err) {
-    gpuSetupRunning = false; gpuSetupDone = true;
-    setDeviceSelect('cpu');
-    $('#gpuSetupPhase').textContent = '无法开始';
-    $('#gpuSetupMessage').textContent = '无法启动 GPU 依赖安装：' + (err && err.message);
-    const btn = $('#gpuSetupCancel'); btn.dataset.mode = 'close'; btn.textContent = '关闭';
-  }
-}
-$('#deviceSelect').onchange = e => {
-  const value = e.target.value;
-  setDeviceSelect(value);
-  if (value === 'auto') startGpuSetup();
-};
-$('#gpuSetupCancel').onclick = () => {
-  const btn = $('#gpuSetupCancel');
-  if (btn.dataset.mode === 'close') { closeGpuSetup(); return; }   // 终态：仅关闭弹窗
-  btn.disabled = true;
-  btn.textContent = '正在取消…';
-  window.lightPlayer.cancelGpuSetup();
-};
-const GPU_PHASE_LABEL = { check: '检测环境', download: '下载依赖（1/2）', install: '安装依赖（2/2）' };
-window.lightPlayer.onGpuSetupEvent(data => {
-  if (!data || data.kind !== 'gpu-setup' || gpuSetupDone) return;
-  // 主进程自动拉 UAC 添加 Defender 排除的过程消息：只更新文案，不动阶段标签与进度条
-  if (data.message_only) { if (data.message) $('#gpuSetupMessage').textContent = data.message; return; }
-  if (data.percent != null) { $('#gpuSetupBar').style.width = data.percent + '%'; $('#gpuSetupPercent').textContent = data.percent + '%'; }
-  if (data.message) $('#gpuSetupMessage').textContent = data.message;
-  const phase = data.phase || 'progress';
-  if (GPU_PHASE_LABEL[phase]) { $('#gpuSetupPhase').textContent = GPU_PHASE_LABEL[phase]; return; }
-  if (phase === 'progress') { $('#gpuSetupPhase').textContent = '处理中'; return; }
-  gpuSetupDone = true;
-  gpuSetupRunning = false;
-  const btn = $('#gpuSetupCancel');
-  if (phase === 'ready') {           // 成功：保持在双模式，1.5 秒后自动关闭
-    $('#gpuSetupPhase').textContent = '完成';
-    $('#gpuSetupBar').style.width = '100%'; $('#gpuSetupPercent').textContent = '100%';
-    btn.disabled = true; btn.textContent = '安装完成';
-    setDeviceSelect('auto');
-    setTimeout(closeGpuSetup, 1500);
-    return;
-  }
-  // 失败/取消：立即回退为仅 CPU，弹窗保留结果供查看
-  setDeviceSelect('cpu');
-  $('#gpuSetupPhase').textContent = phase === 'canceled' ? '已取消' : '安装失败';
-  if (!data.message) $('#gpuSetupMessage').textContent = '已回退为「仅 CPU」识别';
-  btn.disabled = false; btn.dataset.mode = 'close'; btn.textContent = '关闭';
-});
-
 /* 恢复上次会话：音量 → 倍速 → 播放列表与上次视频
    异常不中断后续事件绑定；恢复结果记录到 __resumeDebug 便于诊断 */
 (function restoreSession() {
@@ -960,13 +844,6 @@ function parseSub(raw) {
   return out;
 }
 
-/* ---------- 模型路径 ---------- */
-const savedModelPath = localStorage.getItem('lightplayer-model-path') || '';
-$('#modelPath').value = savedModelPath;
-$('#chooseModelPath').onclick = async () => { const p = await window.lightPlayer.openModelDirectory(); if (p) { $('#modelPath').value = p; localStorage.setItem('lightplayer-model-path', p); $('#modelNote').textContent = '模型目录已更新，将优先从该位置加载。'; } };
-$('#clearModelPath').onclick = () => { localStorage.removeItem('lightplayer-model-path'); $('#modelPath').value = ''; $('#modelNote').textContent = '未设置模型目录，将使用默认模型位置。'; };
-$('#model').onchange = () => {};   // 仅 Qwen3-ASR 一种后端，无切换逻辑
-
 /* ---------- SRT 导出（入口在数据管理弹窗） ---------- */
 const toSrtTime = s => { const ms = Math.max(0, Math.round(s * 1000)); return `${String(Math.floor(ms / 3600000)).padStart(2, '0')}:${String(Math.floor(ms / 60000) % 60).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')},${String(ms % 1000).padStart(3, '0')}`; };
 async function exportCurrentSrt() {
@@ -981,14 +858,14 @@ async function exportCurrentSrt() {
 
 /* ---------- 实时字幕：阶段与进度 ---------- */
 let asrSid = 0;   // 当前识别会话 id（与常驻 daemon 对齐，用于丢弃旧会话残留事件）
-const STAGES = ['dependency', 'model', 'audio', 'transcribe'];
-const STAGE_LABELS = { dependency: 'CPU 依赖检查', model: '加载识别模型', audio: '分析视频音频', transcribe: '实时转写', display: '完成' };
+const STAGES = ['model', 'audio', 'transcribe'];
+const STAGE_LABELS = { model: '准备识别模型', audio: '分析视频音频', transcribe: '实时转写', display: '完成' };
 function setStepState(id, state) { const el = $('#' + id); if (el) el.dataset.state = state; }
 function setDeviceBadge(device) {
   const el = $('#deviceBadge');
-  if (!device) { el.textContent = '设备：未运行'; el.className = 'device-badge'; return; }
-  el.textContent = '设备：' + device;
-  el.className = 'device-badge' + (device === 'CPU + GPU' ? ' gpu' : ' cpu');
+  if (!device) { el.textContent = '引擎：未运行'; el.className = 'device-badge'; return; }
+  el.textContent = '引擎：SenseVoice · CPU';
+  el.className = 'device-badge cpu';
 }
 // 阶段计时：每个阶段显示「已用 Ns」，让加载/分析阶段也有可感知的进展
 let asrStageTimer = null, asrStageStart = 0, asrStageLabel = '';
@@ -1032,8 +909,6 @@ function setAsrUi(on) {
 }
 async function startAsrRun() {
   if (!activeFile) { $('#asrStatus').textContent = '请先打开视频'; $('#caption').textContent = '请先打开视频'; $('#caption').classList.remove('hidden'); setAsrUi(false); return; }
-  const modelPath = $('#modelPath').value.trim();
-  if (!modelPath) { $('#asrStatus').textContent = '请先设置本地模型路径（字幕 → 实时字幕）'; $('#caption').textContent = '请先设置本地模型路径'; $('#caption').classList.remove('hidden'); setAsrUi(false); return; }
   setAsrUi(true);
   // 等待新视频元数据就绪（load() 后 duration 还是 NaN，直接启动会导致“无法读取视频时长”）
   if (!isFinite(video.duration) || video.duration <= 0) {
@@ -1051,9 +926,9 @@ async function startAsrRun() {
   stopStageTimer();
   $('#asrStageLabel').textContent = '准备中'; $('#asrPercent').textContent = '0%'; $('#asrBar').style.width = '0%'; $('#asrMessage').textContent = '';
   setDeviceBadge(null);
-  $('#caption').textContent = '正在准备运行环境…'; $('#caption').classList.remove('hidden');
-  $('#asrStatus').textContent = '正在准备本地 ASR 运行环境…';
-  const r = await window.lightPlayer.startAsr({ video: activeFile, modelPath, modelKind: $('#model').value, duration: video.duration, start: video.currentTime, device: $('#deviceSelect').value });
+  $('#caption').textContent = '正在准备本地识别引擎…'; $('#caption').classList.remove('hidden');
+  $('#asrStatus').textContent = '正在准备本地识别引擎（首次开启需下载模型）…';
+  const r = await window.lightPlayer.startAsr({ video: activeFile, duration: video.duration, start: video.currentTime });
   asrSid = r && r.sid ? r.sid : 0;   // 记录本次会话，过滤旧会话残留事件
 }
 async function toggleAsr() {
@@ -1125,7 +1000,7 @@ window.lightPlayer.onAsrEvent(data => {
   if (data.kind === 'exit' && data.code !== 0 && !window.asrLastError && $('#asrSwitch').classList.contains('on')) {
     const detail = data.detail ? `（${String(data.detail).slice(0, 220)}）` : '';
     stopStageTimer();
-    $('#asrStatus').textContent = 'ASR 进程已退出，请检查模型路径和 Python 依赖' + detail;
+    $('#asrStatus').textContent = '本地识别引擎异常退出，请重试' + detail;
     $('#asrMessage').textContent = 'ASR 进程已退出' + detail;
     setAsrUi(false);
   }
@@ -1139,15 +1014,10 @@ function openModal(name, tab, playOnly) {
   overlay.classList.remove('hidden');
   if (name === 'data') { refreshDataInfo(); refreshCacheInfo(); }
   if (name === 'hotkeys') { recordingHotkey = null; renderHotkeyList(null); }
-  if (name === 'settings') {
-    // 工具栏入口：仅显示播放设置分区；菜单入口：显示完整设置
-    overlay.querySelectorAll('.sec-device').forEach(s => s.classList.toggle('hidden', !!playOnly));
-  }
 }
 function closeModals() {
   document.querySelectorAll('.modal-overlay').forEach(m => {
-    if (m.id === 'modalGpuSetup' && gpuSetupRunning) return;   // 依赖安装进行中：不允许被其它弹窗操作连带关闭
-    if (m.id === 'modalConfirm') return;                        // 确认弹窗只能由其按钮关闭
+    if (m.id === 'modalConfirm') return;   // 确认弹窗只能由其按钮关闭
     m.classList.add('hidden');
   });
 }
@@ -1164,7 +1034,7 @@ $('#menuOpen').onclick = e => { e.stopPropagation(); $('#appMenu').classList.add
 $('#playSettingsBtn').onclick = () => openModal('settings', null, true);   // 工具栏：仅播放设置分区
 document.querySelectorAll('.modal-overlay').forEach(overlay => {
   overlay.addEventListener('click', e => {
-    if (e.target === overlay && overlay.id !== 'modalGpuSetup' && overlay.id !== 'modalConfirm') closeModals();
+    if (e.target === overlay && overlay.id !== 'modalConfirm') closeModals();
   });
   overlay.querySelectorAll('[data-close]').forEach(btn => btn.onclick = closeModals);
 });
@@ -1295,7 +1165,7 @@ function refreshDataInfo() {
   // 设置项 = 全部 lightplayer-* 键，扣除进度与播放列表（这两类单独统计展示）
   const settingKeys = Object.keys(localStorage).filter(k => k.startsWith('lightplayer-') && !k.startsWith('lightplayer-progress-') && k !== 'lightplayer-playlist').length;
   const styleSaved = !!store.get('caption-style', null);
-  info.innerHTML = `播放进度记录：<b>${progressCount}</b> 个视频<br>播放列表：<b>${hasPlaylist ? store.get('playlist', {}).files.length + ' 个文件' : '无'}</b><br>播放器设置项：<b>${settingKeys}</b> 项（含字幕样式${styleSaved ? '已自定义' : '默认'}、音量、倍速、设备等）`;
+  info.innerHTML = `播放进度记录：<b>${progressCount}</b> 个视频<br>播放列表：<b>${hasPlaylist ? store.get('playlist', {}).files.length + ' 个文件' : '无'}</b><br>播放器设置项：<b>${settingKeys}</b> 项（含字幕样式${styleSaved ? '已自定义' : '默认'}、音量、倍速等）`;
 }
 function clearProgressData() { lpKeys('progress-').forEach(k => localStorage.removeItem(k)); }
 $('#dataRefresh').onclick = () => { refreshDataInfo(); refreshCacheInfo(); };
@@ -1313,13 +1183,13 @@ $('#dataClearPlaylist').onclick = async () => {
   renderPlaylist();
   refreshDataInfo(); refreshCacheInfo();
 };
-// 清除设置时的排除项：模型路径（重新选择成本高，用户明确要求保留）
-const EXCLUDED_CLEAR_KEYS = ['lightplayer-progress-', 'lightplayer-playlist', 'lightplayer-model-path'];
+// 清除设置时保留进度与播放列表（这两类单独管理）
+const EXCLUDED_CLEAR_KEYS = ['lightplayer-progress-', 'lightplayer-playlist'];
 function clearSettingsKeys() {
   Object.keys(localStorage).filter(k => k.startsWith('lightplayer-') && !EXCLUDED_CLEAR_KEYS.some(ex => k === ex || k.startsWith(ex))).forEach(k => localStorage.removeItem(k));
 }
 $('#dataClearSettings').onclick = async () => {
-  if (!await showConfirm('将重置音量、倍速、字幕样式、字幕显示开关、识别设备等全部播放器设置（模型路径保留）。确定清除吗？', { title: '清除播放器设置' })) return;
+  if (!await showConfirm('将重置音量、倍速、字幕样式、字幕显示开关等全部播放器设置。确定清除吗？', { title: '清除播放器设置' })) return;
   clearSettingsKeys();
   capStyle = { ...DEFAULT_CAP_STYLE }; applyCaptionStyle();   // 样式恢复默认并同步 UI
   setCaptionVisible(store.get('caption-visible', true));      // 开关已随设置重置，同步菜单/弹层状态
@@ -1356,7 +1226,7 @@ $('#dataClearAll').onclick = async () => {
   if (activeFile) stopPlayback();
   clearProgressData();
   store.del('playlist');
-  clearSettingsKeys();   // 模型路径同样保留
+  clearSettingsKeys();
   capStyle = { ...DEFAULT_CAP_STYLE }; applyCaptionStyle();
   setCaptionVisible(store.get('caption-visible', true));
   window.lightPlayer.setHwAccel(true);   // 设置清空后硬件加速恢复默认（开）
