@@ -18,9 +18,11 @@
     "directories": {
       "output": "dist"
     },
+    "afterAllArtifactBuild": "build/after-build.js",
     "files": [
       "src/**/*",
       "build/icon.ico",
+      "build/icon.png",
       "package.json"
     ],
     "asarUnpack": [

@@ -240,7 +240,10 @@ app.whenReady().then(() => {
       modelDir: resolveModelDir(app.isPackaged, app.getAppPath(), process.resourcesPath),
       duration: Number(options.duration) || 0,
       start: Number(options.start) || 0,
-      chunk: Number(options.chunk) || 4
+      chunk: Number(options.chunk) || 4,
+      // 透传「是否使用缓存」：渲染端关闭时必须原样送达 worker（缺省视为开启），
+      // 否则 worker 端 msg.cache === undefined 会按默认开启处理，关闭开关仍会写缓存文件。
+      cache: options.cache !== false
     });
     return { ok, sid };
   });

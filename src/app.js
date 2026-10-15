@@ -24,7 +24,6 @@ const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   trash: '<path d="M4 7h16"/><path d="M9.5 7V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v2"/><path d="M6.5 7l1 12a2 2 0 0 0 2 1.8h5a2 2 0 0 0 2-1.8l1-12"/><path d="M10 11v6M14 11v6"/>',
   gear: '<circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
-  brand: '<defs><linearGradient id="lpBrandG" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c5cff"/><stop offset="1" stop-color="#25d0d2"/></linearGradient></defs><rect x="2" y="2" width="20" height="20" rx="6" fill="url(#lpBrandG)" stroke="none"/><path d="M10 8.1v7.8L16.4 12z" fill="#fff" stroke="none"/>'
 };
 const icon = name => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
 const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -33,7 +32,7 @@ const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<':
 const app = document.getElementById('app');
 app.innerHTML = `
 <header class="titlebar">
-  <div class="brand" id="brandBtn" title="主菜单">${icon('brand')}<span>LightPlayer</span><span class="brand-caret">${icon('chevron')}</span></div>
+  <div class="brand" id="brandBtn" title="主菜单"><img class="brand-logo" src="../build/icon.png" alt=""><span>LightPlayer</span><span class="brand-caret">${icon('chevron')}</span></div>
   <div class="app-menu hidden" id="appMenu">
     <div class="menu-item" id="menuOpen">打开视频…</div>
     <div class="menu-group">
@@ -68,7 +67,7 @@ app.innerHTML = `
     <div class="empty-state" id="empty"><div class="empty-icon">${icon('video')}</div><h2>打开一个视频开始播放</h2><p>支持 MP4、MKV、WebM、MOV 等格式</p><div class="drop-hint">拖放文件到此处，或按 Ctrl + O</div></div>
     <div class="top-chip hidden" id="qualityChip">原画</div>
     <div class="resume-toast hidden" id="resumeToast">
-      <span id="resumeToastText">已从上次位置续播</span>
+      <span id="resumeToastText">已定位到上次观看位置</span>
       <button id="resumeRestart">从头开始播放</button>
       <i class="resume-bar" id="resumeBar"></i>
     </div>
@@ -86,8 +85,8 @@ app.innerHTML = `
           <button class="fs-btn primary" id="fsPlay" title="播放/暂停">${icon('play')}</button>
           <button class="fs-btn" id="fsForward" title="快进 10 秒">${icon('forward10')}</button>
           <span class="fs-time" id="fsTime">00:00 / 00:00</span>
-          <div class="fs-volume"><button class="fs-btn" id="fsMute" title="静音">${icon('volume')}</button><input type="range" id="fsVolume" min="0" max="1" step="0.01" value="1"></div>
           <div class="spacer"></div>
+          <button class="fs-btn" id="fsMute" title="音量 / 静音">${icon('volume')}</button>
           <button class="fs-btn" id="fsSpeedBtn" title="播放倍速">1×</button>
           <button class="fs-btn toggle-cc" id="fsSubBtn" title="字幕">${icon('cc')}</button>
           <button class="fs-btn" id="fsPanelBtn" title="播放列表 / 目录">${icon('panel')}</button>
@@ -117,6 +116,15 @@ app.innerHTML = `
       <div class="sp-sep cap-style-sep"></div>
       <div class="sp-item" id="popOpenStyle">字幕样式</div>
     </div>
+    <!-- 音量子菜单：普通工具栏与全屏工具栏各一个（点击右侧音量按钮弹出，内含滑杆与音量百分比） -->
+    <div class="vol-popover hidden" id="volPopover">
+      <div class="vol-head"><span>音量</span><span class="vol-val" id="volVal">100%</span></div>
+      <div class="vol-body"><input type="range" class="vol-range" id="volRange" min="0" max="1" step="0.01" value="1" title="音量"></div>
+    </div>
+    <div class="vol-popover hidden" id="fsVolPopover">
+      <div class="vol-head"><span>音量</span><span class="vol-val" id="fsVolVal">100%</span></div>
+      <div class="vol-body"><input type="range" class="vol-range" id="fsVolRange" min="0" max="1" step="0.01" value="1" title="音量"></div>
+    </div>
   </div>
   <div class="controls">
     <div class="progress" id="progress"><div class="fill" id="fill"></div><input type="range" id="seek" min="0" max="1000" value="0"></div>
@@ -126,8 +134,8 @@ app.innerHTML = `
       <button class="ctrl primary" id="play" title="播放/暂停">${icon('play')}</button>
       <button class="ctrl" id="forward" title="快进 10 秒">${icon('forward10')}</button>
       <span class="time" id="time">00:00 / 00:00</span>
-      <div class="volume"><button class="ctrl" id="mute" title="静音">${icon('volume')}</button><input type="range" id="volume" min="0" max="1" step="0.01" value="1"></div>
       <div class="spacer"></div>
+      <button class="ctrl" id="mute" title="音量 / 静音">${icon('volume')}</button>
       <button class="ctrl" id="speed" title="播放倍速">1×</button>
       <button class="ctrl" id="playSettingsBtn" title="播放设置">${icon('gear')}</button>
       <button class="ctrl toggle-cc" id="subBtn" title="字幕">${icon('cc')}</button>
@@ -151,9 +159,11 @@ app.innerHTML = `
     <div class="modal-head"><h3>实时字幕</h3><button class="modal-close" data-close>${icon('close')}</button></div>
     <div class="modal-body">
       <div class="section">
+        <!-- 顶部总开关：是否使用缓存（默认关闭，仅开启时实时字幕才读写视频同目录缓存） -->
+        <div class="settings-row">是否使用缓存 <div class="switch" id="asrCacheSwitch"></div></div>
         <div class="subtitle-box">
           <div class="subtitle-status"><span class="dot" id="asrDot"></span><span id="asrStatus">实时字幕已关闭</span><span class="device-badge" id="deviceBadge">引擎：未运行</span><div class="switch" id="asrSwitch"></div></div>
-          <div class="model-note" id="modelNote">SenseVoiceSmall（中/英/粤/日/韩）· 本机识别，不上传视频。首次开启自动下载约 240MB 识别模型，之后离线可用。</div>
+          <div class="model-note" id="modelNote">SenseVoiceSmall（中/英/粤/日/韩）· 本机识别，不上传视频。首次开启自动下载约 240MB 识别模型，之后离线可用。关闭“是否使用缓存”时，识别结果仅在本次播放中显示，不写入视频同目录缓存。</div>
           <div class="asr-progress hidden" id="asrProgress">
             <div class="asr-progress-head"><span>当前阶段：<b id="asrStageLabel">准备中</b></span><span><span id="asrElapsed"></span><span id="asrPercent">0%</span></span></div>
             <div class="asr-bar"><i id="asrBar"></i></div>
@@ -163,7 +173,6 @@ app.innerHTML = `
               <div class="step" id="step-transcribe">实时转写</div>
             </div>
             <div class="asr-message" id="asrMessage"></div>
-            <button class="btn wide" id="asrSkip" style="margin-top:8px">跳过排队，优先识别当前播放位置</button>
           </div>
         </div>
       </div>
@@ -206,7 +215,7 @@ app.innerHTML = `
           <option value="next">自动连播</option>
           <option value="loop">循环播放</option>
         </select></div>
-      <div class="settings-row">自动播放上次未播完内容 <div class="switch" id="autoResume"></div></div><div class="settings-row">记住播放进度 <div class="switch" id="resumePlay"></div></div><div class="settings-row">记住播放列表 <div class="switch" id="keepPlaylist"></div></div><div class="settings-row">硬件加速 <div class="switch" id="hwAccel"></div></div></div>
+      <div class="settings-row">自动开播 <div class="switch" id="autoPlay"></div></div><div class="settings-row">自动定位上次观看位置 <div class="switch" id="autoResume"></div></div><div class="settings-row">记住播放进度 <div class="switch" id="resumePlay"></div></div><div class="settings-row">记住播放列表 <div class="switch" id="keepPlaylist"></div></div><div class="settings-row">硬件加速 <div class="switch" id="hwAccel"></div></div></div>
     </div>
   </div>
 </div>
@@ -231,7 +240,7 @@ app.innerHTML = `
     <div class="modal-head"><h3>关于</h3><button class="modal-close" data-close>${icon('close')}</button></div>
     <div class="modal-body">
       <div class="section" style="text-align:center;padding:18px 0">
-        <div style="display:inline-flex;width:56px;height:56px;border-radius:14px;overflow:hidden;margin-bottom:12px">${icon('brand')}</div>
+        <img class="about-logo" src="../build/icon.png" alt="" style="width:56px;height:56px;border-radius:14px;display:block;margin:0 auto 12px">
         <h2 style="margin:0 0 6px;font-size:20px">LightPlayer</h2>
         <p class="hint-text" style="margin:0">轻量、隐私优先的本地播放器<br>版本 1.0.0</p>
       </div>
@@ -248,7 +257,7 @@ app.innerHTML = `
       <div class="section"><h3>应用保留的数据</h3>
         <div class="cache-info" id="dataInfo">正在统计…</div>
         <div class="cache-info" id="cacheInfo">尚未打开视频</div>
-        <p class="hint-text">字幕缓存：识别结果自动保存在视频同目录（视频名.lightplayer-subs.json）。再次打开该视频直接复用缓存字幕，仅识别缺失部分；清除字幕时也会同时删除缓存。</p>
+        <p class="hint-text">字幕缓存：开启“是否使用缓存”后，识别结果会保存在视频同目录（视频名.lightplayer-subs.json）。再次打开该视频直接复用缓存字幕，仅识别缺失部分；未开启该开关时实时字幕不读写缓存，识别结果仅在本次播放中显示。清除字幕时也会同时删除缓存。</p>
         <div class="btn-row">
           <button class="btn" id="dataRefresh">刷新统计</button>
           <button class="btn" id="dataExportSrt">导出当前视频字幕为 SRT</button>
@@ -311,8 +320,10 @@ const store = {
   del(key) { try { localStorage.removeItem('lightplayer-' + key); } catch (_) {} }
 };
 const settings = {
-  resumePlay: store.get('resume-play', true),    // 记住播放进度（续播）
-  keepPlaylist: store.get('keep-playlist', true) // 记住播放列表
+  resumePlay: store.get('resume-play', true),    // 记住播放进度（续播定位）
+  keepPlaylist: store.get('keep-playlist', true), // 记住播放列表
+  autoPlay: store.get('auto-play', false),       // 自动开播（默认关闭）：开启才在视频载入后自动播放
+  asrCache: store.get('asr-cache', false)        // 是否使用缓存（默认关闭）：关闭时实时字幕不读写缓存
 };
 function saveProgress() {
   if (!settings.resumePlay || !activeFile || !isFinite(video.duration) || video.duration <= 0) return;
@@ -351,13 +362,27 @@ const DEFAULT_CAP_STYLE = { size: 22, color: '#ffffff', bg: '#000000', bgAlpha: 
 let capStyle = { ...DEFAULT_CAP_STYLE };
 try { capStyle = { ...DEFAULT_CAP_STYLE, ...JSON.parse(localStorage.getItem('lightplayer-caption-style') || '{}') }; } catch (_) {}
 const hexToRgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; };
+/* 字幕字号随播放区域高度缩放：小窗口与全屏下字幕占视窗的比例保持一致。
+   基准高度 800px 约等于默认窗口（1440×900）的播放区高度，故默认窗口下系数≈1，
+   全屏 1080p 约 1.35×、最小窗口约 0.7×；夹在 0.5–2.5 之间避免极端值。 */
+const CAPTION_REF_H = 800;
+function captionScale() {
+  const wrap = document.getElementById('videoWrap');
+  const h = (wrap && wrap.clientHeight) || window.innerHeight || CAPTION_REF_H;
+  return Math.min(2.5, Math.max(0.5, h / CAPTION_REF_H));
+}
+function syncCaptionFontSize() {
+  const c = $('#caption');
+  if (!c) return;
+  c.style.fontSize = (capStyle.size * captionScale()).toFixed(1) + 'px';
+}
 function applyCaptionStyle() {
   const c = $('#caption');
-  c.style.fontSize = capStyle.size + 'px';
+  syncCaptionFontSize();
   c.style.color = capStyle.color;
   if (capStyle.bgAlpha > 0) {
     c.style.background = hexToRgba(capStyle.bg, capStyle.bgAlpha / 100);
-    c.style.padding = '2px 12px'; c.style.borderRadius = '6px'; c.style.textShadow = 'none';
+    c.style.padding = '0.09em 0.55em'; c.style.borderRadius = '0.27em'; c.style.textShadow = 'none';   // em 随字号缩放
   } else {
     c.style.background = 'transparent';
     c.style.padding = '0'; c.style.borderRadius = '0'; c.style.textShadow = '0 2px 12px #000,0 1px 3px #000';
@@ -506,9 +531,12 @@ function fileUrl(f) {
   return 'file://' + encodeURI(p);
 }
 function loadFile(file, opts = {}) {
-  const autoPlay = opts.autoPlay !== false;   // 启动恢复场景传 false，仅在自动续播开关开启时自动播放
+  // 自动开播：以持久化的“自动开播”开关为准（默认关闭，载入后停在首帧/上次定位处等用户播放）
+  const autoPlay = opts.autoPlay !== undefined ? !!opts.autoPlay : settings.autoPlay;
   // 实时字幕自动启动以持久化偏好为准（受字幕显示开关约束），不再依赖当前会话的 UI 状态
   const asrPrefOn = captionVisible && store.get('asr-enabled', false);
+  // 是否使用缓存：关闭时实时字幕不使用（不读也不写）视频同目录缓存
+  const asrCacheOn = settings.asrCache;
   if (asrPrefOn) window.lightPlayer.stopAsr();
   // 切换视频：重置实时字幕进度面板与激活状态，避免残留上一个视频的数据
   window.asrLastError = false;
@@ -526,10 +554,12 @@ function loadFile(file, opts = {}) {
   $('#asrStatus').textContent = '实时字幕已关闭'; setAsrUi(false);
   setDeviceBadge(null);
   renderPlaylist(); savePlaylistState();
-  // 续播：恢复上次播放位置；左下角提示带“从头播放”按钮，5 秒倒计时条
+  // 自动定位上次观看位置：定位到上次进度；左下角提示带“从头播放”按钮，5 秒倒计时条（是否接着播放由自动开播决定）
   const resume = loadProgress(file);
   const resumeAt = () => {
-    if (!resume) return;
+    // 是否定位到上次观看位置由“自动定位上次观看位置”开关决定（默认开启）；
+    // 关闭时从头开始，是否起播仍由“自动开播”决定。
+    if (!resume || !store.get('auto-resume', true)) return;
     video.currentTime = resume.t;
     showResumeToast(resume.t);
   };
@@ -550,7 +580,9 @@ function loadFile(file, opts = {}) {
       }).catch(() => {});
     });
   }, { once: true });
-  $('#seek').title = resume ? `上次播放到 ${fmt(resume.t)}，已续播；拖动可从头选择位置` : '拖动跳转播放位置';  window.lightPlayer.readCaptionCache(file).then(cached => {
+  $('#seek').title = resume ? `上次观看位置 ${fmt(resume.t)}，已定位；拖动可重新选择位置` : '拖动跳转播放位置';
+  // 是否使用缓存开启时：载入该视频已有缓存字幕（关闭时实时字幕完全不使用缓存）
+  if (asrCacheOn) window.lightPlayer.readCaptionCache(file).then(cached => {
     if (activeFile !== file || !Array.isArray(cached) || !cached.length || subtitles.length) return;
     subtitles = cached.map(c => ({ start: c.start, end: c.end, text: c.text, asr: true }));
     $('#asrStatus').textContent = `已加载缓存字幕 · ${subtitles.length} 条`;
@@ -570,17 +602,56 @@ $('#addPlaylistBtn').onclick = openFiles; $('#addFolderBtn').onclick = openFolde
 $('#play').onclick = () => video.paused ? video.play() : video.pause();
 $('#back').onclick = () => video.currentTime = Math.max(0, video.currentTime - 10);
 $('#forward').onclick = () => video.currentTime = Math.min(video.duration || 0, video.currentTime + 10);
-$('#mute').onclick = () => { video.muted = !video.muted; updateMuteIcons(); store.set('volume', { v: video.volume, m: video.muted }); };
-$('#volume').oninput = e => { video.volume = e.target.value; $('#fsVolume').value = video.volume; store.set('volume', { v: video.volume, m: video.muted }); };
+/* 音量：按钮位于工具栏右侧，点击弹出子菜单，在子菜单内调音量并显示百分比（普通 / 全屏同步） */
+function volPercent() { return Math.round((video.muted ? 0 : video.volume) * 100) + '%'; }
+// 两个滑杆、两个百分比与静音图标一起同步（调音量 / 静音 / 恢复会话时都走这里）
+function syncVolumeUi() {
+  const v = String(video.volume);
+  $('#volRange').value = v; $('#fsVolRange').value = v;
+  const pct = volPercent();
+  $('#volVal').textContent = pct; $('#fsVolVal').textContent = pct;
+  updateMuteIcons();
+}
+function setVolume(v, persist = true) {
+  video.volume = Math.min(1, Math.max(0, Number(v) || 0));
+  if (video.volume > 0 && video.muted) video.muted = false;   // 拖动滑杆即视为取消静音
+  syncVolumeUi();
+  if (persist) store.set('volume', { v: video.volume, m: video.muted });
+}
+function toggleVolumePopover(sel, anchor) {
+  const pop = $(sel);
+  const wasHidden = pop.classList.contains('hidden');
+  hideAllPopovers();
+  if (!wasHidden) return;
+  syncVolumeUi();
+  positionFloatingPopover(pop, anchor, 'center');   // 音量弹窗在按钮正上方居中显示
+}
+$('#mute').onclick = e => { e.stopPropagation(); toggleVolumePopover('#volPopover', $('#mute')); };
+$('#fsMute').onclick = e => { e.stopPropagation(); toggleVolumePopover('#fsVolPopover', $('#fsMute')); };
+$('#volRange').oninput = e => setVolume(e.target.value);
+$('#fsVolRange').oninput = e => setVolume(e.target.value);
+// 子菜单内操作不冒泡到 document，避免边拖滑杆边把浮层关掉
+$('#volPopover').onclick = e => e.stopPropagation();
+$('#fsVolPopover').onclick = e => e.stopPropagation();
+// 点击音量按钮/浮层以外的任意位置即收起音量浮层。
+// 必须用捕获阶段：其他工具按钮（倍速/字幕/列表等）在自己的 onclick 里 stopPropagation，
+// 冒泡阶段的 document 监听会被拦住，导致打开音量浮层后点其他按钮它不消失。
+document.addEventListener('click', e => {
+  if (e.target.closest('#mute, #fsMute, #volPopover, #fsVolPopover')) return;
+  $('#volPopover').classList.add('hidden');
+  $('#fsVolPopover').classList.add('hidden');
+}, true);
 $('#full').onclick = () => document.fullscreenElement ? document.exitFullscreen() : $('#videoWrap').requestFullscreen();
 $('#seek').oninput = e => { if (video.duration) video.currentTime = video.duration * e.target.value / 1000; };
 
 /* 画面交互：单击切换播放/暂停，双击切换全屏（单击延迟 250ms 等待双击判定） */
 const videoWrap = $('#videoWrap');
+// 播放区尺寸变化（窗口缩放 / 进出全屏）时重算字幕字号，保证字幕视觉大小一致
+new ResizeObserver(() => syncCaptionFontSize()).observe(videoWrap);
 // 全屏时浏览器只渲染全屏元素（#videoWrap）子树：把所有弹窗移入其中，
 // 否则全屏下打开字幕样式/实时字幕/设置/确认等弹窗会看不到
 document.querySelectorAll('.modal-overlay').forEach(m => videoWrap.appendChild(m));
-const VIDEO_CLICK_SKIP = '.caption, .empty-state, .top-chip, .resume-toast, .fs-ui, .modal-overlay, .sub-popover';
+const VIDEO_CLICK_SKIP = '.caption, .empty-state, .top-chip, .resume-toast, .fs-ui, .modal-overlay, .sub-popover, .vol-popover';
 let videoClickTimer = null;
 videoWrap.addEventListener('click', e => {
   if (e.target.closest(VIDEO_CLICK_SKIP)) return;   // 字幕/空态/角标/续播提示/全屏工具栏/各类浮层弹窗不触发播放暂停
@@ -598,8 +669,7 @@ let fsIdleTimer = null;
 function syncFsControls() {
   $('#fsTitle').textContent = activeFile ? activeFile.split(/[\\/]/).pop() : '本地视频播放器';
   setPlayIcon();
-  updateMuteIcons();
-  $('#fsVolume').value = video.volume;
+  syncVolumeUi();   // 静音图标 / 音量滑杆 / 百分比（普通与全屏工具栏同步）
   $('#fsSpeedBtn').textContent = video.playbackRate + '×';
   const p = video.duration ? video.currentTime / video.duration : 0;
   $('#fsFill').style.width = p * 100 + '%'; $('#fsSeek').value = p * 1000;
@@ -624,8 +694,6 @@ $('#stop').onclick = () => {
 $('#fsStop').onclick = () => { if (activeFile) stopPlayback(); };
 $('#fsBack').onclick = () => { video.currentTime = Math.max(0, video.currentTime - 10); };
 $('#fsForward').onclick = () => { video.currentTime = Math.min(video.duration || 0, video.currentTime + 10); };
-$('#fsMute').onclick = () => { video.muted = !video.muted; updateMuteIcons(); store.set('volume', { v: video.volume, m: video.muted }); };
-$('#fsVolume').oninput = e => { video.volume = e.target.value; $('#volume').value = video.volume; store.set('volume', { v: video.volume, m: video.muted }); };
 $('#fsSeek').oninput = e => { if (video.duration) video.currentTime = video.duration * e.target.value / 1000; };
 // fsSubBtn 的点击行为在「字幕弹出菜单（普通/全屏共用）」中统一绑定，此处不再单独开关实时字幕
 $('#fsExit').onclick = () => document.exitFullscreen();
@@ -652,9 +720,11 @@ function renderFsPlaylist() {
     return `<div class="fs-pl-group"><div class="fs-pl-group-name" title="${escapeHtml(g.dir)}">${escapeHtml(name)}<span class="fs-pl-n">${g.files.length}</span></div>${items}</div>`;
   }).join('');
 }
-// 统一收起所有浮动面板（字幕菜单 / 倍速菜单 / 全屏播放列表）
+// 统一收起所有浮动面板（字幕菜单 / 音量子菜单 / 倍速菜单 / 全屏播放列表）
 function hideAllPopovers() {
   $('#subPopover').classList.add('hidden');
+  $('#volPopover').classList.add('hidden');
+  $('#fsVolPopover').classList.add('hidden');
   $('#fsPlaylist').classList.add('hidden');
   hideSpeedMenus();
 }
@@ -703,8 +773,8 @@ function onSpeedPick(e) {
   hideSpeedMenus();
   syncAsrPosition();
 }
-$('#speed').onclick = e => { e.stopPropagation(); $('#subPopover').classList.add('hidden'); $('#fsPlaylist').classList.add('hidden'); renderSpeedMenu(); const open = $('#speedMenu').classList.contains('hidden'); hideSpeedMenus(); if (open) $('#speedMenu').classList.remove('hidden'); };
-$('#fsSpeedBtn').onclick = e => { e.stopPropagation(); $('#subPopover').classList.add('hidden'); $('#fsPlaylist').classList.add('hidden'); renderSpeedMenu(); const open = $('#fsSpeedMenu').classList.contains('hidden'); hideSpeedMenus(); if (open) $('#fsSpeedMenu').classList.remove('hidden'); };
+$('#speed').onclick = e => { e.stopPropagation(); $('#subPopover').classList.add('hidden'); $('#fsPlaylist').classList.add('hidden'); renderSpeedMenu(); const open = $('#speedMenu').classList.contains('hidden'); hideSpeedMenus(); if (open) positionFloatingPopover($('#speedMenu'), $('#speed')); };
+$('#fsSpeedBtn').onclick = e => { e.stopPropagation(); $('#subPopover').classList.add('hidden'); $('#fsPlaylist').classList.add('hidden'); renderSpeedMenu(); const open = $('#fsSpeedMenu').classList.contains('hidden'); hideSpeedMenus(); if (open) positionFloatingPopover($('#fsSpeedMenu'), $('#fsSpeedBtn')); };
 $('#speedMenu').onclick = onSpeedPick;
 $('#fsSpeedMenu').onclick = onSpeedPick;
 document.addEventListener('click', e => {
@@ -736,28 +806,16 @@ function bindSettingSwitch(id, key, get, set) {
   el.onclick = () => { const on = el.classList.toggle('on'); set(on); store.set(key, on); };
 }
 bindSettingSwitch('resumePlay', 'resume-play', () => settings.resumePlay, on => { settings.resumePlay = on; if (!on) { /* 关闭时清除所有已存进度 */ Object.keys(localStorage).filter(k => k.startsWith('lightplayer-progress-')).forEach(k => localStorage.removeItem(k)); } });
+// 自动开播：仅控制“载入视频后要不要自动起播”，与“自动定位上次观看位置”相互独立（定位由后者决定）
+bindSettingSwitch('autoPlay', 'auto-play', () => settings.autoPlay, on => { settings.autoPlay = on; });
 bindSettingSwitch('keepPlaylist', 'keep-playlist', () => settings.keepPlaylist, on => { settings.keepPlaylist = on; if (on) savePlaylistState(); else store.del('playlist'); });
-// 自动播放上次未播完内容：开启时强制联动“记住播放进度”和“记住播放列表”，二者锁定为开，仅当本开关关闭后才能单独调整
-function syncDependentSwitches() {
-  const locked = store.get('auto-resume', true);
-  if (locked) {
-    settings.resumePlay = true; store.set('resume-play', true);
-    settings.keepPlaylist = true; store.set('keep-playlist', true);
-    $('#resumePlay').classList.add('on');
-    $('#keepPlaylist').classList.add('on');
-  }
-  $('#resumePlay').style.pointerEvents = locked ? 'none' : '';
-  $('#resumePlay').style.opacity = locked ? '.55' : '';
-  $('#keepPlaylist').style.pointerEvents = locked ? 'none' : '';
-  $('#keepPlaylist').style.opacity = locked ? '.55' : '';
-}
+// 自动定位上次观看位置：开启时载入视频后跳到上次进度（是否随即播放由“自动开播”决定）。
+// 与“记住播放进度 / 记住播放列表”相互独立：定位开关默认开启，三个开关都可单独调整。
+$('#autoResume').classList.toggle('on', store.get('auto-resume', true));
 $('#autoResume').onclick = () => {
   const on = $('#autoResume').classList.toggle('on');
   store.set('auto-resume', on);
-  syncDependentSwitches();
 };
-$('#autoResume').classList.toggle('on', store.get('auto-resume', true));
-syncDependentSwitches();
 // 硬件加速：marker 文件（主进程下次启动读取）+ localStorage 双写，重启后生效
 let hwAccelOn = store.get('hw-accel', true);
 $('#hwAccel').classList.toggle('on', hwAccelOn);
@@ -778,10 +836,10 @@ $('#hotkeys').onclick = () => { hotkeysOn = $('#hotkeys').classList.toggle('on')
       if (saved && Array.isArray(saved.files) && saved.files.length) {
         playlist = saved.files;
         renderPlaylist();
-        // 自动播放上次未播完内容：恢复视频并自动播放（loadFile 内续播到上次进度）
-        // 仅记住列表（未开自动续播）：恢复列表与视频但不自动播放
+        // 自动定位上次观看位置：恢复上次视频并定位到上次进度
+        // 是否自动起播由“自动开播”开关决定（默认关闭：恢复后停在定位处，手动播放）
         if (saved.active && playlist.includes(saved.active)) {
-          loadFile(saved.active, { autoPlay: store.get('auto-resume', true) });
+          loadFile(saved.active);
           window.__resumeDebug = 'restored:' + saved.active;
         } else {
           window.__resumeDebug = 'no-active:' + (saved.active || '(空)');
@@ -801,7 +859,7 @@ $('#hotkeys').onclick = () => { hotkeysOn = $('#hotkeys').classList.toggle('on')
     if (vol && isFinite(vol.v)) {
       video.volume = Math.min(1, Math.max(0, vol.v));
       video.muted = !!vol.m;
-      $('#volume').value = video.volume;
+      syncVolumeUi();
       updateMuteIcons();
     }
     const savedSpeed = store.get('speed', 1);
@@ -928,7 +986,7 @@ async function startAsrRun() {
   setDeviceBadge(null);
   $('#caption').textContent = '正在准备本地识别引擎…'; $('#caption').classList.remove('hidden');
   $('#asrStatus').textContent = '正在准备本地识别引擎（首次开启需下载模型）…';
-  const r = await window.lightPlayer.startAsr({ video: activeFile, duration: video.duration, start: video.currentTime });
+  const r = await window.lightPlayer.startAsr({ video: activeFile, duration: video.duration, start: video.currentTime, cache: settings.asrCache });
   asrSid = r && r.sid ? r.sid : 0;   // 记录本次会话，过滤旧会话残留事件
 }
 async function toggleAsr() {
@@ -955,12 +1013,15 @@ function turnAsrOff() {
   setDeviceBadge(null);
 }
 $('#asrSwitch').onclick = toggleAsr;
-// 播放器栏 CC 按钮的弹菜单绑定见「工具栏字幕弹出菜单」；全屏 CC 按钮仍为实时字幕快捷开关
-$('#asrSkip').onclick = () => {   // 取消当前识别队列，立即回到播放位置附近识别
-  if (!activeFile) return;
-  window.lightPlayer.seekAsr({ start: video.currentTime, rate: video.paused ? 0 : video.playbackRate, seek: true });
-  $('#asrMessage').textContent = '已跳过排队，优先识别当前播放位置';
+// 顶部开关：是否使用缓存（持久化，默认关闭）。改动即时生效：
+// 关闭时本次会话不再读写视频同目录缓存；开启后重新开始识别即可复用/写入缓存。
+$('#asrCacheSwitch').classList.toggle('on', settings.asrCache);
+$('#asrCacheSwitch').onclick = e => {
+  e.stopPropagation();
+  settings.asrCache = $('#asrCacheSwitch').classList.toggle('on');
+  store.set('asr-cache', settings.asrCache);
 };
+// 播放器栏 CC 按钮的弹菜单绑定见「工具栏字幕弹出菜单」；全屏 CC 按钮仍为实时字幕快捷开关
 window.lightPlayer.onAsrEvent(data => {
   // 常驻 daemon 事件带会话 id：丢弃已切换/已停止会话的残留事件
   if (data && typeof data.sid === 'number' && data.sid !== asrSid && data.kind !== 'exit') return;
@@ -1108,13 +1169,15 @@ $('#popOpenStyle').onclick = () => { $('#subPopover').classList.add('hidden'); o
 /* ---------- 字幕弹出菜单（普通工具栏 + 全屏工具栏共用） ---------- */
 // 弹层为 video-wrap 内的 fixed 浮层，打开时按被点击按钮的位置定位（窗口/全屏均适用）
 let subPopAnchor = null;   // 当前弹层的锚点按钮，内容高度变化后据此重新定位
-function positionSubPopover(anchor) {
-  const pop = $('#subPopover');
+// 弹层为 video-wrap 内的 fixed 浮层，打开时按被点击按钮的位置定位（窗口/全屏均适用）；
+// 字幕菜单与音量子菜单共用本函数（默认宽度/高度按各自内容给定，实际尺寸优先）
+function positionFloatingPopover(pop, anchor, align = 'right') {
   pop.classList.remove('hidden');
   const r = anchor.getBoundingClientRect();
   const pw = pop.offsetWidth || 210;
   const ph = pop.offsetHeight || 260;
-  let left = r.right - pw;                 // 右缘对齐按钮右缘
+  // align='center'：相对按钮水平居中（音量弹窗用）；默认右缘对齐按钮右缘（其他弹窗保持原样）
+  let left = align === 'center' ? r.left + r.width / 2 - pw / 2 : r.right - pw;
   left = Math.max(8, Math.min(left, window.innerWidth - pw - 8));
   let top = r.top - ph - 8;                // 默认显示在按钮上方
   if (top < 8) top = r.bottom + 8;         // 上方空间不足则显示在下方
@@ -1126,7 +1189,7 @@ function toggleSubPopover(anchor) {
   hideSpeedMenus();
   $('#fsPlaylist').classList.add('hidden');
   const pop = $('#subPopover');
-  if (pop.classList.contains('hidden')) { subPopAnchor = anchor; positionSubPopover(anchor); }
+  if (pop.classList.contains('hidden')) { subPopAnchor = anchor; positionFloatingPopover(pop, anchor); }
   else { pop.classList.add('hidden'); subPopAnchor = null; }
 }
 $('#subBtn').onclick = e => { e.stopPropagation(); toggleSubPopover($('#subBtn')); };
@@ -1136,7 +1199,7 @@ $('#subPopover').onclick = e => e.stopPropagation();
 // 尺寸变化后必须按原锚点按钮重新定位，否则变高时底部越出视窗、变矮时悬浮在按钮上方过高处。
 // 普通与全屏工具栏共用同一弹层，此处一并生效；弹层隐藏或无锚点（如左上角菜单内切开关）时不处理。
 new ResizeObserver(() => {
-  if (subPopAnchor && !$('#subPopover').classList.contains('hidden')) positionSubPopover(subPopAnchor);
+  if (subPopAnchor && !$('#subPopover').classList.contains('hidden')) positionFloatingPopover($('#subPopover'), subPopAnchor);
 }).observe($('#subPopover'));
 
 /* 目录栏显示/隐藏 */
@@ -1145,10 +1208,11 @@ $('#folderBtn').onclick = () => {
   $('#folderBtn').classList.toggle('on', !hidden);
 };
 
-/* 字幕缓存信息（数据管理弹窗内展示） */
+/* 字幕缓存信息（数据管理弹窗内展示；未开启“是否使用缓存”时实时字幕不使用缓存） */
 async function refreshCacheInfo() {
   const info = $('#cacheInfo');
   if (!info) return;
+  if (!settings.asrCache) { info.textContent = '未开启“是否使用缓存”，实时字幕不使用字幕缓存'; info.className = 'cache-info'; return; }
   if (!activeFile) { info.textContent = '当前视频：未打开视频，无字幕缓存'; info.className = 'cache-info'; return; }
   const cached = await window.lightPlayer.readCaptionCache(activeFile);
   const caps = Array.isArray(cached) ? cached : (cached && cached.captions) || [];
@@ -1244,8 +1308,8 @@ const HOTKEY_ACTIONS = [
   { id: 'full', label: '全屏', def: 'KeyF', run: () => $('#full').click() },
   { id: 'mute', label: '静音', def: 'KeyM', run: () => $('#mute').click() },
   { id: 'open', label: '打开视频', def: 'Ctrl+KeyO', run: () => openFiles() },
-  { id: 'volup', label: '音量 +10%', def: 'ArrowUp', run: () => { video.volume = Math.min(1, video.volume + 0.1); $('#volume').value = video.volume; store.set('volume', { v: video.volume, m: video.muted }); } },
-  { id: 'voldown', label: '音量 -10%', def: 'ArrowDown', run: () => { video.volume = Math.max(0, video.volume - 0.1); $('#volume').value = video.volume; store.set('volume', { v: video.volume, m: video.muted }); } }
+  { id: 'volup', label: '音量 +10%', def: 'ArrowUp', run: () => setVolume(video.volume + 0.1) },
+  { id: 'voldown', label: '音量 -10%', def: 'ArrowDown', run: () => setVolume(video.volume - 0.1) }
 ];
 let hotkeyMap = null;   // { actionId: 'Key' 或 'Ctrl+Key' }
 try { hotkeyMap = JSON.parse(localStorage.getItem('lightplayer-hotkeys') || 'null'); } catch (_) {}

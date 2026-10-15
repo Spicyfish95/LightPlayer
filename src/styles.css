@@ -9,7 +9,8 @@ button,input,select{font:inherit}
 .titlebar{height:44px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid var(--line);background:#0b0f18;-webkit-app-region:drag}
 .brand{display:flex;align-items:center;gap:9px;font-weight:750;cursor:pointer;padding:4px 10px;border-radius:8px;position:relative;-webkit-app-region:no-drag}
 .brand:hover{background:#182030}
-.brand .ic{width:24px;height:24px}
+/* 左上角应用图标：直接使用 build/icon.png（与安装包/任务栏图标同一份素材） */
+.brand-logo{width:24px;height:24px;border-radius:7px;display:block;flex:none}
 .brand-caret{display:inline-flex;color:#5f6f8c}
 .brand-caret .ic{width:13px;height:13px;transform:rotate(180deg)}
 
@@ -144,9 +145,7 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 #seek{width:100%;position:relative;z-index:1}
 #seek::-webkit-slider-runnable-track{height:4px;background:#232e42;border-radius:2px}
 #seek::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#fff;margin-top:-4px;box-shadow:0 1px 4px rgba(0,0,0,.5)}
-#volume{width:70px}
-#volume::-webkit-slider-runnable-track{height:4px;background:#232e42;border-radius:2px}
-#volume::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;border-radius:50%;background:#c6d0e2;margin-top:-3px}
+/* 音量滑杆与百分比移入音量子菜单，工具栏只保留按钮 */
 .control-row{display:flex;align-items:center;gap:6px;margin-top:6px}
 .ctrl{height:32px;min-width:36px;padding:0 6px;border:0;border-radius:8px;background:transparent;color:#c6d0e2;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:13px}
 .ctrl:hover{background:#1a2334;color:#fff}
@@ -156,11 +155,24 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 .ctrl.primary{width:44px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--cyan));color:#fff}
 .ctrl.primary .ic{width:22px;height:22px}
 .time{color:var(--muted);font-size:12px;margin:0 8px;white-space:nowrap}
-.volume{display:flex;align-items:center;gap:4px}
 .spacer{flex:1}
 
+/* ---------- 音量子菜单（普通工具栏 / 全屏工具栏共用样式：竖向滑杆 + 音量百分比） ---------- */
+.vol-popover{position:fixed;z-index:330;width:76px;background:#141b2a;border:1px solid var(--line);border-radius:12px;padding:10px 12px;box-shadow:0 14px 40px rgba(0,0,0,.55)}
+.vol-popover .vol-head{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:12px;color:#aab6ca;margin-bottom:6px}
+.vol-popover .vol-val{color:#fff;font-variant-numeric:tabular-nums}
+/* 竖向滑杆：容器固定高度，input 保持横向布局后整体旋转 90°（自定义轨道/滑块样式无需重写） */
+.vol-popover .vol-body{height:116px;display:flex;align-items:center;justify-content:center}
+.vol-popover input.vol-range{width:108px;height:14px;transform:rotate(-90deg);display:block;background:transparent}
+.vol-popover input.vol-range::-webkit-slider-runnable-track{height:4px;background:#232e42;border-radius:2px}
+.vol-popover input.vol-range::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#fff;margin-top:-4px;box-shadow:0 1px 4px rgba(0,0,0,.5)}
+/* 全屏工具栏是深色浮层，滑杆用更亮的轨道，保证在画面上可见 */
+.video-wrap:fullscreen .vol-popover{background:rgba(14,19,30,.96)}
+.video-wrap:fullscreen .vol-popover input.vol-range::-webkit-slider-runnable-track{background:rgba(255,255,255,.28)}
+
 /* ---------- 倍速子菜单 ---------- */
-.speed-menu{position:absolute;right:96px;bottom:58px;background:#141b2a;border:1px solid var(--line);border-radius:10px;padding:6px;min-width:86px;z-index:30;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+/* 倍速子菜单：与音量/字幕弹窗一致改为 fixed，由 positionFloatingPopover 贴着按钮定位 */
+.speed-menu{position:fixed;z-index:330;background:#141b2a;border:1px solid var(--line);border-radius:10px;padding:6px;min-width:86px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
 .speed-item{padding:7px 10px;border-radius:7px;font-size:12.5px;color:#c6d0e2;cursor:pointer;display:flex;justify-content:space-between;align-items:center}
 .speed-item:hover{background:#1c2740}
 .speed-item.active{color:#fff;background:rgba(124,92,255,.2)}
@@ -225,6 +237,8 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 
 /* ---------- 字幕面板 ---------- */
 .subtitle-box{border:1px solid var(--line);border-radius:12px;background:var(--panel2);padding:12px}
+/* 实时字幕弹窗顶部为“是否使用缓存”开关行，与下方字幕控制卡片留出间距 */
+#modalAsr .subtitle-box{margin-top:12px}
 .subtitle-status{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:13px}
 .dot{width:8px;height:8px;border-radius:50%;background:#3a465e;flex:none}
 .dot.on{background:var(--green);box-shadow:0 0 8px rgba(80,214,173,.6)}
@@ -292,14 +306,12 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 .fs-btn .ic{width:21px;height:21px}
 .fs-btn.primary .ic{width:23px;height:23px}
 .fs-time{color:#d7deea;font-size:12px;margin:0 6px;white-space:nowrap;text-shadow:0 1px 4px rgba(0,0,0,.6)}
-.fs-volume{display:flex;align-items:center;gap:4px}
-.fs-volume input{width:76px}
 #fsSeek{width:100%;position:relative;z-index:1}
 #fsSeek::-webkit-slider-runnable-track{height:4px;background:rgba(255,255,255,.28);border-radius:2px}
 #fsSeek::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:#fff;margin-top:-4.5px;box-shadow:0 1px 6px rgba(0,0,0,.6)}
-.fs-volume input::-webkit-slider-runnable-track{height:4px;background:rgba(255,255,255,.28);border-radius:2px}
-.fs-volume input::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;border-radius:50%;background:#fff;margin-top:-3.5px}
-.fs-ui .fs-speed-menu{right:20px;bottom:76px;pointer-events:auto}
+/* 全屏音量按钮保留在工具栏右侧，音量滑杆改由 #fsVolPopover 子菜单承载 */
+/* 全屏倍速菜单：定位交由 positionFloatingPopover，仅需恢复 .fs-ui 上被禁用的鼠标事件 */
+.fs-ui .fs-speed-menu{pointer-events:auto}
 
 /* 全屏播放列表面板 */
 .fs-playlist{position:absolute;right:18px;bottom:76px;width:300px;max-width:calc(100% - 36px);max-height:62vh;display:flex;flex-direction:column;background:rgba(14,19,30,.96);border:1px solid var(--line);border-radius:12px;box-shadow:0 16px 44px rgba(0,0,0,.6);z-index:60;pointer-events:auto;overflow:hidden}

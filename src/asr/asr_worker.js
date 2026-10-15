@@ -235,6 +235,7 @@ async function transcribeVideoSession(cfg, ff, control) {
   let cacheDirty = false;
 
   function saveCache(force) {
+    if (!cfg.cache) return;   // 未开启“是否使用缓存”：本次会话不写入任何缓存文件（含 .json 与 .tmp）
     const now = Date.now() / 1000;
     if (!force && now - cacheLast < 10) { cacheDirty = true; return; }
     try {
@@ -256,8 +257,8 @@ async function transcribeVideoSession(cfg, ff, control) {
     const total = cfg.total;
     control.emit('status', { stage: 'audio', percent: 18, message: '模型已加载，开始分析视频音频' });
 
-    // 载入缓存字幕：立即下发并标记已覆盖
-    if (fs.existsSync(cachePath)) {
+    // 载入缓存字幕：立即下发并标记已覆盖（仅在开启“是否使用缓存”时读取缓存）
+    if (cfg.cache && fs.existsSync(cachePath)) {
       try {
         const raw = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
         let capItems, coveredItems;
@@ -472,6 +473,7 @@ process.parentPort.on('message', async e => {
         total,
         start: parseFloat(msg.start) || 0,
         chunk: parseFloat(msg.chunk) || 4,
+        cache: msg.cache !== false,   // 是否使用缓存（渲染端经主进程透传，默认开启；false 时不读写任何缓存文件）
       }, ff, control);
     } catch (exc) {
       if (control.shouldStop() || String(exc.message) === 'stopped') {
