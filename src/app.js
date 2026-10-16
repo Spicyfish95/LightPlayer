@@ -71,6 +71,12 @@ app.innerHTML = `
       <button id="resumeRestart">从头开始播放</button>
       <i class="resume-bar" id="resumeBar"></i>
     </div>
+    <!-- 滚轮调音量提示：窗口聚焦时用滚轮改音量即出现；位于 #videoWrap 内，全屏同样可见 -->
+    <div class="vol-toast hidden" id="volToast">
+      <span class="vt-ico" id="volToastIcon">${icon('volume')}</span>
+      <span class="vt-val" id="volToastVal">100%</span>
+      <i class="vt-bar"><b id="volToastBar"></b></i>
+    </div>
     <div class="caption cap-bottom hidden" id="caption"></div>
     <div class="fs-ui" id="fsUi">
       <div class="fs-top">
@@ -115,6 +121,18 @@ app.innerHTML = `
       </div>
       <div class="sp-sep cap-style-sep"></div>
       <div class="sp-item" id="popOpenStyle">字幕样式</div>
+    </div>
+    <!-- 播放设置弹层：工具栏齿轮按钮弹出，与同组字幕/音量/倍速一致（fixed 浮层，随按钮定位）。
+         左上角菜单的「设置」仍打开完整设置弹窗；两处控件共享同一份状态，见 syncPlaySettingsUi()。 -->
+    <div class="sub-popover play-pop hidden" id="playPop">
+      <div class="sp-group-label">播放设置</div>
+      <div class="sp-item sp-switch-row"><span>播放后操作</span><select class="select sp-select" id="popAfterPlay" title="播放后操作"><option value="none">暂停</option><option value="next">自动连播</option><option value="loop">循环播放</option></select></div>
+      <div class="sp-sep"></div>
+      <div class="sp-item sp-switch-row"><span>自动开播</span><div class="switch" id="popAutoPlay"></div></div>
+      <div class="sp-item sp-switch-row"><span>自动定位上次观看位置</span><div class="switch" id="popAutoResume"></div></div>
+      <div class="sp-item sp-switch-row"><span>记住播放进度</span><div class="switch" id="popResumePlay"></div></div>
+      <div class="sp-item sp-switch-row"><span>记住播放列表</span><div class="switch" id="popKeepPlaylist"></div></div>
+      <div class="sp-item sp-switch-row"><span>硬件加速</span><div class="switch" id="popHwAccel"></div></div>
     </div>
     <!-- 音量子菜单：普通工具栏与全屏工具栏各一个（点击右侧音量按钮弹出，内含滑杆与音量百分比） -->
     <div class="vol-popover hidden" id="volPopover">
@@ -486,6 +504,7 @@ function stopPlayback() {
   empty.classList.remove('hidden'); $('#qualityChip').classList.add('hidden');
   $('#fileName').textContent = '暂无媒体文件'; $('#fileMeta').textContent = '打开视频后显示信息';
   $('#windowTitle').textContent = '本地视频播放器'; $('#fsTitle').textContent = '本地视频播放器';
+  hideVolumeToast();
   setPlayIcon();
 }
 function removeFile(file) {
@@ -618,6 +637,16 @@ function setVolume(v, persist = true) {
   syncVolumeUi();
   if (persist) store.set('volume', { v: video.volume, m: video.muted });
 }
+// 静音切换：快捷键 M 直接调用本函数。
+// 注意不能再用 $('#mute').click() —— 音量按钮的职责已改为“弹出音量子菜单”，
+// 借它的 click 只会开关弹窗而不会静音。
+function toggleMute() {
+  video.muted = !video.muted;
+  syncVolumeUi();
+  store.set('volume', { v: video.volume, m: video.muted });
+  showVolumeToast();   // 复用滚轮音量提示：静音显示 0% + 静音图标，取消静音显示当前音量
+  fsShowUi();          // 全屏下按快捷键也算“有操作”，亮起工具栏
+}
 function toggleVolumePopover(sel, anchor) {
   const pop = $(sel);
   const wasHidden = pop.classList.contains('hidden');
@@ -644,6 +673,44 @@ document.addEventListener('click', e => {
 $('#full').onclick = () => document.fullscreenElement ? document.exitFullscreen() : $('#videoWrap').requestFullscreen();
 $('#seek').oninput = e => { if (video.duration) video.currentTime = video.duration * e.target.value / 1000; };
 
+/* 滚轮调音量：窗口前台聚焦时，在播放区滚动滚轮即改音量并弹出提示（普通 / 全屏同一套逻辑）。
+   提示节点位于 #videoWrap 内，且刻意不放进 .fs-ui —— 全屏 idle 时 .fs-ui 整体透明隐藏，
+   音量提示必须照常可见，故独立成层。 */
+const VOL_WHEEL_STEP = 0.05;      // 一格滚轮 5%
+const VOL_TOAST_MS = 1400;        // 提示停留时间
+let volToastTimer = null;
+function showVolumeToast() {
+  const pct = Math.round((video.muted ? 0 : video.volume) * 100);
+  $('#volToastVal').textContent = pct + '%';
+  $('#volToastBar').style.width = pct + '%';
+  $('#volToastIcon').innerHTML = icon(pct === 0 ? 'mute' : 'volume');
+  $('#volToast').classList.remove('hidden');   // 连续滚动时保持同一个提示，不闪烁
+  clearTimeout(volToastTimer);
+  volToastTimer = setTimeout(() => $('#volToast').classList.add('hidden'), VOL_TOAST_MS);
+}
+function hideVolumeToast() { $('#volToast').classList.add('hidden'); clearTimeout(volToastTimer); }
+// 滚轮向上加、向下减；到 0/100% 时同样弹提示（给出边界反馈）。
+// 静音时向上滚 = 取消静音并回到静音前的音量再加一格（而不是从 0% 重新爬），向下滚保持静音。
+function wheelVolume(deltaY) {
+  const up = deltaY < 0;
+  if (video.muted && !up) { showVolumeToast(); fsShowUi(); return; }   // 已静音，再向下滚仍是静音，只回显提示
+  const next = Math.min(1, Math.max(0, Math.round((video.volume + (up ? VOL_WHEEL_STEP : -VOL_WHEEL_STEP)) * 100) / 100));
+  if (next !== video.volume) setVolume(next);   // setVolume 在音量 > 0 时会自动取消静音
+  showVolumeToast();
+  fsShowUi();                          // 全屏下滚轮也算“有操作”，顺带亮起工具栏
+}
+window.addEventListener('wheel', e => {
+  if (!document.hasFocus()) return;                                    // 仅窗口前台聚焦时生效
+  if (!activeFile) return;                                             // 未载入视频时不响应
+  if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;        // 组合键滚轮（缩放等）不拦截
+  if (!e.deltaY) return;                                               // 横向滚动忽略
+  if (!(e.target instanceof Element)) return;
+  // 侧栏 / 弹窗 / 各类浮层内保留原生滚动（如播放列表、全屏列表面板可滚动）
+  if (e.target.closest('.modal-overlay, .side, .app-menu, .sub-popover, .speed-menu, .fs-playlist, .vol-popover, .play-pop')) return;
+  e.preventDefault();
+  wheelVolume(e.deltaY);
+}, { passive: false });
+
 /* 画面交互：单击切换播放/暂停，双击切换全屏（单击延迟 250ms 等待双击判定） */
 const videoWrap = $('#videoWrap');
 // 播放区尺寸变化（窗口缩放 / 进出全屏）时重算字幕字号，保证字幕视觉大小一致
@@ -651,7 +718,7 @@ new ResizeObserver(() => syncCaptionFontSize()).observe(videoWrap);
 // 全屏时浏览器只渲染全屏元素（#videoWrap）子树：把所有弹窗移入其中，
 // 否则全屏下打开字幕样式/实时字幕/设置/确认等弹窗会看不到
 document.querySelectorAll('.modal-overlay').forEach(m => videoWrap.appendChild(m));
-const VIDEO_CLICK_SKIP = '.caption, .empty-state, .top-chip, .resume-toast, .fs-ui, .modal-overlay, .sub-popover, .vol-popover';
+const VIDEO_CLICK_SKIP = '.caption, .empty-state, .top-chip, .resume-toast, .fs-ui, .modal-overlay, .sub-popover, .vol-popover, .play-pop';
 let videoClickTimer = null;
 videoWrap.addEventListener('click', e => {
   if (e.target.closest(VIDEO_CLICK_SKIP)) return;   // 字幕/空态/角标/续播提示/全屏工具栏/各类浮层弹窗不触发播放暂停
@@ -720,9 +787,10 @@ function renderFsPlaylist() {
     return `<div class="fs-pl-group"><div class="fs-pl-group-name" title="${escapeHtml(g.dir)}">${escapeHtml(name)}<span class="fs-pl-n">${g.files.length}</span></div>${items}</div>`;
   }).join('');
 }
-// 统一收起所有浮动面板（字幕菜单 / 音量子菜单 / 倍速菜单 / 全屏播放列表）
+// 统一收起所有浮动面板（字幕菜单 / 播放设置弹层 / 音量子菜单 / 倍速菜单 / 全屏播放列表）
 function hideAllPopovers() {
   $('#subPopover').classList.add('hidden');
+  $('#playPop').classList.add('hidden');
   $('#volPopover').classList.add('hidden');
   $('#fsVolPopover').classList.add('hidden');
   $('#fsPlaylist').classList.add('hidden');
@@ -773,8 +841,8 @@ function onSpeedPick(e) {
   hideSpeedMenus();
   syncAsrPosition();
 }
-$('#speed').onclick = e => { e.stopPropagation(); $('#subPopover').classList.add('hidden'); $('#fsPlaylist').classList.add('hidden'); renderSpeedMenu(); const open = $('#speedMenu').classList.contains('hidden'); hideSpeedMenus(); if (open) positionFloatingPopover($('#speedMenu'), $('#speed')); };
-$('#fsSpeedBtn').onclick = e => { e.stopPropagation(); $('#subPopover').classList.add('hidden'); $('#fsPlaylist').classList.add('hidden'); renderSpeedMenu(); const open = $('#fsSpeedMenu').classList.contains('hidden'); hideSpeedMenus(); if (open) positionFloatingPopover($('#fsSpeedMenu'), $('#fsSpeedBtn')); };
+$('#speed').onclick = e => { e.stopPropagation(); const open = $('#speedMenu').classList.contains('hidden'); hideAllPopovers(); renderSpeedMenu(); if (open) positionFloatingPopover($('#speedMenu'), $('#speed')); };
+$('#fsSpeedBtn').onclick = e => { e.stopPropagation(); const open = $('#fsSpeedMenu').classList.contains('hidden'); hideAllPopovers(); renderSpeedMenu(); if (open) positionFloatingPopover($('#fsSpeedMenu'), $('#fsSpeedBtn')); };
 $('#speedMenu').onclick = onSpeedPick;
 $('#fsSpeedMenu').onclick = onSpeedPick;
 document.addEventListener('click', e => {
@@ -782,47 +850,87 @@ document.addEventListener('click', e => {
   if (!e.target.closest('#fsSpeedBtn') && !e.target.closest('#fsSpeedMenu')) $('#fsSpeedMenu').classList.add('hidden');
 });
 
-/* 播放后操作：无操作 / 自动连播 / 循环播放（单选下拉，持久化，默认无操作） */
+/* ---------- 播放设置：工具栏弹层（#playPop）与左上角菜单的「设置」弹窗（#modalSettings）共用状态 ----------
+   同一批设置在两处各有一套控件（弹层 id = 弹窗 id 加 pop 前缀），任一处改动都先经 setter 落盘，
+   再由 syncPlaySettingsUi() 把两处 UI 一并按状态刷新，避免弹层与弹窗显示不一致。 */
+// 播放后操作：无操作 / 自动连播 / 循环播放（单选下拉，持久化，默认无操作）
 const AFTER_PLAY_OPTS = ['none', 'next', 'loop'];
 function afterPlay() { const v = store.get('after-play', 'none'); return AFTER_PLAY_OPTS.includes(v) ? v : 'none'; }
-$('#afterPlay').value = afterPlay();
-$('#afterPlay').onchange = () => {
-  store.set('after-play', $('#afterPlay').value);
-  syncVideoLoop();
-};
 function syncVideoLoop() { video.loop = afterPlay() === 'loop'; }
+function setAfterPlay(v) {
+  store.set('after-play', AFTER_PLAY_OPTS.includes(v) ? v : 'none');
+  syncVideoLoop();
+  syncPlaySettingsUi();
+}
+// 记住播放进度：关闭时清除所有已存进度
+function setResumePlay(on) {
+  settings.resumePlay = !!on;
+  store.set('resume-play', settings.resumePlay);
+  if (!settings.resumePlay) Object.keys(localStorage).filter(k => k.startsWith('lightplayer-progress-')).forEach(k => localStorage.removeItem(k));
+  syncPlaySettingsUi();
+}
+// 自动开播：仅控制“载入视频后要不要自动起播”，与“自动定位上次观看位置”相互独立（定位由后者决定）
+function setAutoPlay(on) { settings.autoPlay = !!on; store.set('auto-play', settings.autoPlay); syncPlaySettingsUi(); }
+// 记住播放列表：开启即保存当前列表，关闭即清除已存列表
+function setKeepPlaylist(on) {
+  settings.keepPlaylist = !!on;
+  store.set('keep-playlist', settings.keepPlaylist);
+  if (settings.keepPlaylist) savePlaylistState(); else store.del('playlist');
+  syncPlaySettingsUi();
+}
+// 自动定位上次观看位置：开启时载入视频后跳到上次进度（是否随即播放由“自动开播”决定）。
+// 与“记住播放进度 / 记住播放列表”相互独立：定位开关默认开启，三个开关都可单独调整。
+const autoResumeOn = () => !!store.get('auto-resume', true);
+function setAutoResume(on) { store.set('auto-resume', !!on); syncPlaySettingsUi(); }
+// 硬件加速：marker 文件（主进程下次启动读取）+ localStorage 双写，重启后生效
+let hwAccelOn = !!store.get('hw-accel', true);
+function setHwAccel(on) {
+  hwAccelOn = !!on;
+  store.set('hw-accel', hwAccelOn);
+  window.lightPlayer.setHwAccel(hwAccelOn);
+  syncPlaySettingsUi();
+}
+// 两处 UI 同步：弹层与设置弹窗的控件按同一份状态刷新（状态是唯一依据，不依赖 DOM 上的 on 类）
+function syncPlaySettingsUi() {
+  const v = afterPlay();
+  $('#afterPlay').value = v; $('#popAfterPlay').value = v;
+  $('#autoPlay').classList.toggle('on', settings.autoPlay); $('#popAutoPlay').classList.toggle('on', settings.autoPlay);
+  $('#autoResume').classList.toggle('on', autoResumeOn()); $('#popAutoResume').classList.toggle('on', autoResumeOn());
+  $('#resumePlay').classList.toggle('on', settings.resumePlay); $('#popResumePlay').classList.toggle('on', settings.resumePlay);
+  $('#keepPlaylist').classList.toggle('on', settings.keepPlaylist); $('#popKeepPlaylist').classList.toggle('on', settings.keepPlaylist);
+  $('#hwAccel').classList.toggle('on', hwAccelOn); $('#popHwAccel').classList.toggle('on', hwAccelOn);
+}
+// 开关行绑定：弹层与弹窗各绑一次，点击一律“取反当前状态”交给 setter（不读 DOM 类名，避免两处状态漂移）
+function bindSwitchPair(popId, modalId, get, set) {
+  $('#' + popId).onclick = () => set(!get());
+  $('#' + modalId).onclick = () => set(!get());
+}
+bindSwitchPair('popResumePlay', 'resumePlay', () => settings.resumePlay, setResumePlay);
+bindSwitchPair('popAutoPlay', 'autoPlay', () => settings.autoPlay, setAutoPlay);
+bindSwitchPair('popKeepPlaylist', 'keepPlaylist', () => settings.keepPlaylist, setKeepPlaylist);
+bindSwitchPair('popAutoResume', 'autoResume', autoResumeOn, setAutoResume);
+bindSwitchPair('popHwAccel', 'hwAccel', () => hwAccelOn, setHwAccel);
+// 播放后操作下拉：两处共用 setAfterPlay
+$('#afterPlay').onchange = e => setAfterPlay(e.target.value);
+$('#popAfterPlay').onchange = e => setAfterPlay(e.target.value);
+// 「数据管理」清空设置后调用：内存中的 settings/hwAccelOn 仍是旧值（localStorage 已被清空），
+// 需重新按默认值读回并同步两处 UI，否则弹层与设置弹窗会继续显示已被清除的旧状态。
+function reloadPlaySettings() {
+  settings.resumePlay = store.get('resume-play', true);
+  settings.keepPlaylist = store.get('keep-playlist', true);
+  settings.autoPlay = store.get('auto-play', false);
+  hwAccelOn = store.get('hw-accel', true);
+  syncVideoLoop();
+  syncPlaySettingsUi();
+}
 syncVideoLoop();
+syncPlaySettingsUi();   // 初始化：两处控件按持久化状态渲染
 // 视频播放结束：播放后操作为“自动连播”时播下一个视频（当前文件夹下一个，或下一个文件夹的第一个）
 video.onended = () => {
   if (afterPlay() !== 'next') return;
   const idx = playlist.indexOf(activeFile);
   if (idx < 0 || idx >= playlist.length - 1) return;   // 列表末尾或不在列表中
   loadFile(playlist[idx + 1]);
-};
-// 记住播放进度 / 记住播放列表（持久化开关）
-function bindSettingSwitch(id, key, get, set) {
-  const el = $('#' + id);
-  el.classList.toggle('on', get());
-  el.onclick = () => { const on = el.classList.toggle('on'); set(on); store.set(key, on); };
-}
-bindSettingSwitch('resumePlay', 'resume-play', () => settings.resumePlay, on => { settings.resumePlay = on; if (!on) { /* 关闭时清除所有已存进度 */ Object.keys(localStorage).filter(k => k.startsWith('lightplayer-progress-')).forEach(k => localStorage.removeItem(k)); } });
-// 自动开播：仅控制“载入视频后要不要自动起播”，与“自动定位上次观看位置”相互独立（定位由后者决定）
-bindSettingSwitch('autoPlay', 'auto-play', () => settings.autoPlay, on => { settings.autoPlay = on; });
-bindSettingSwitch('keepPlaylist', 'keep-playlist', () => settings.keepPlaylist, on => { settings.keepPlaylist = on; if (on) savePlaylistState(); else store.del('playlist'); });
-// 自动定位上次观看位置：开启时载入视频后跳到上次进度（是否随即播放由“自动开播”决定）。
-// 与“记住播放进度 / 记住播放列表”相互独立：定位开关默认开启，三个开关都可单独调整。
-$('#autoResume').classList.toggle('on', store.get('auto-resume', true));
-$('#autoResume').onclick = () => {
-  const on = $('#autoResume').classList.toggle('on');
-  store.set('auto-resume', on);
-};
-// 硬件加速：marker 文件（主进程下次启动读取）+ localStorage 双写，重启后生效
-let hwAccelOn = store.get('hw-accel', true);
-$('#hwAccel').classList.toggle('on', hwAccelOn);
-$('#hwAccel').onclick = () => {
-  hwAccelOn = $('#hwAccel').classList.toggle('on');
-  store.set('hw-accel', hwAccelOn);
-  window.lightPlayer.setHwAccel(hwAccelOn);
 };
 // 快捷键：即时生效（空格/方向键/F/Ctrl+O）
 let hotkeysOn = store.get('hotkeys', true);
@@ -1092,7 +1200,33 @@ document.querySelectorAll('.app-menu .menu-item[data-modal]').forEach(item => {
   item.onclick = e => { e.stopPropagation(); $('#appMenu').classList.add('hidden'); openModal(item.dataset.modal); };
 });
 $('#menuOpen').onclick = e => { e.stopPropagation(); $('#appMenu').classList.add('hidden'); openFiles(); };
-$('#playSettingsBtn').onclick = () => openModal('settings', null, true);   // 工具栏：仅播放设置分区
+/* ---------- 播放设置弹层（工具栏齿轮按钮） ----------
+   与同工具组的字幕/音量/倍速一致：点击按钮在按钮上方弹出浮层，点击别处或再点按钮收起。
+   左上角菜单的「设置」项仍打开完整设置弹窗（openModal('settings')），不受此处影响；
+   两处控件共享同一份状态（见 syncPlaySettingsUi）。 */
+let playPopAnchor = null;   // 弹层锚点按钮：内容高度变化后据此重新定位
+function togglePlayPopover(anchor) {
+  const pop = $('#playPop');
+  const wasHidden = pop.classList.contains('hidden');
+  hideAllPopovers();                      // 先收起其他浮层（音量子菜单/倍速菜单/字幕菜单/全屏列表）
+  if (!wasHidden) return;                 // 再次点击按钮 = 收起
+  syncPlaySettingsUi();                   // 打开前按当前状态刷新控件
+  playPopAnchor = anchor;
+  positionFloatingPopover(pop, anchor);
+}
+$('#playSettingsBtn').onclick = e => { e.stopPropagation(); togglePlayPopover($('#playSettingsBtn')); };
+$('#playPop').onclick = e => e.stopPropagation();   // 弹层内操作不冒泡，避免拖滑杆/点开关时被关掉
+// 点击按钮/弹层以外的任意位置即收起。
+// 必须用捕获阶段：其他工具按钮的 onclick 普遍 stopPropagation，冒泡阶段的 document 监听收不到事件，
+// 会出现「打开播放设置后点其他按钮它不消失」（与音量子菜单同一处理，见 CodeWiki 第 13 节第 15 条）。
+document.addEventListener('click', e => {
+  if (e.target.closest('#playSettingsBtn, #playPop')) return;
+  $('#playPop').classList.add('hidden');
+}, true);
+// 弹层内容高度变化（文案换行等）后按原锚点重新定位，否则可能越出视窗
+new ResizeObserver(() => {
+  if (playPopAnchor && !$('#playPop').classList.contains('hidden')) positionFloatingPopover($('#playPop'), playPopAnchor);
+}).observe($('#playPop'));
 document.querySelectorAll('.modal-overlay').forEach(overlay => {
   overlay.addEventListener('click', e => {
     if (e.target === overlay && overlay.id !== 'modalConfirm') closeModals();
@@ -1258,6 +1392,7 @@ $('#dataClearSettings').onclick = async () => {
   capStyle = { ...DEFAULT_CAP_STYLE }; applyCaptionStyle();   // 样式恢复默认并同步 UI
   setCaptionVisible(store.get('caption-visible', true));      // 开关已随设置重置，同步菜单/弹层状态
   window.lightPlayer.setHwAccel(true);
+  reloadPlaySettings();                                       // 播放设置（弹层/弹窗）一并回到默认值
   refreshDataInfo();
 };
 $('#dataClearCache').onclick = async () => {
@@ -1294,6 +1429,7 @@ $('#dataClearAll').onclick = async () => {
   capStyle = { ...DEFAULT_CAP_STYLE }; applyCaptionStyle();
   setCaptionVisible(store.get('caption-visible', true));
   window.lightPlayer.setHwAccel(true);   // 设置清空后硬件加速恢复默认（开）
+  reloadPlaySettings();                  // 播放设置（弹层/弹窗）一并回到默认值
   const r = await window.lightPlayer.clearAllCaptionCaches(playlist);
   refreshDataInfo(); refreshCacheInfo();
   if (r && r.ok && r.deleted) $('#cacheInfo').textContent = `同时删除了 ${r.deleted} 个字幕缓存文件`;
@@ -1306,7 +1442,7 @@ const HOTKEY_ACTIONS = [
   { id: 'back', label: '后退 10 秒', def: 'ArrowLeft', run: () => $('#back').click() },
   { id: 'forward', label: '快进 10 秒', def: 'ArrowRight', run: () => $('#forward').click() },
   { id: 'full', label: '全屏', def: 'KeyF', run: () => $('#full').click() },
-  { id: 'mute', label: '静音', def: 'KeyM', run: () => $('#mute').click() },
+  { id: 'mute', label: '静音', def: 'KeyM', run: () => toggleMute() },
   { id: 'open', label: '打开视频', def: 'Ctrl+KeyO', run: () => openFiles() },
   { id: 'volup', label: '音量 +10%', def: 'ArrowUp', run: () => setVolume(video.volume + 0.1) },
   { id: 'voldown', label: '音量 -10%', def: 'ArrowDown', run: () => setVolume(video.volume - 0.1) }

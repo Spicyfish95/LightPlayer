@@ -49,8 +49,8 @@ LightPlayer 是一个基于 **Electron** 的桌面端本地视频/音频播放�
 - 本地视频/音频播放（MP4、MKV、WebM、MOV、AVI、M4V、MP3、WAV、FLAC）
 - 播放列表管理（按文件夹分组、可折叠、去重）
 - 续播记忆（进度 / 播放列表）；「自动开播」（默认关）决定载入后是否起播，「自动定位上次观看位置」（默认开）决定是否跳到上次进度
-- 播放后操作（无操作 / 自动连播 / 循环播放）
-- 倍速播放（0.5×–3×）、音量记忆（音量按钮位于右侧工具组最左，点击在按钮正上方居中弹出**竖向**滑条子菜单并显示百分比）、硬件加速开关
+- 播放后操作（无操作 / 自动连播 / 循环播放）；播放设置通过右侧工具组齿轮按钮弹出**浮层**（与字幕/音量/倍速同组同风格），左上角菜单「设置」仍打开完整设置弹窗，两处控件共享同一份状态
+- 倍速播放（0.5×–3×）、音量记忆（音量按钮位于右侧工具组最左，点击在按钮正上方居中弹出**竖向**滑条子菜单并显示百分比；**窗口前台聚焦时在播放区滚动鼠标滚轮即可调节音量**，并弹出居中音量提示 toast，普通与全屏一致）、硬件加速开关
 - 可配置快捷键（录制替换、冲突解除、恢复默认）
 - 外部字幕载入（SRT / VTT / ASS / SSA / TXT）、字幕样式自定义、SRT 导出
 - SenseVoice 实时字幕（中/英/粤/日/韩，纯 CPU，首用自动下载约 240MB 模型）
@@ -276,6 +276,10 @@ LightPlayer/
 | `parseSub/toSrtTime` | 外部字幕解析、SRT 时间格式化。 |
 | `applyCaptionStyle/captionScale/syncCaptionFontSize` | 字幕样式应用；字号按播放区高度相对基准 `CAPTION_REF_H=800` 缩放（夹在 0.5–2.5），`ResizeObserver` 监听 `#videoWrap`，保证小窗口与全屏下字幕视觉大小一致。 |
 | `positionFloatingPopover(pop, anchor, align)` | 统一弹窗定位：默认右缘对齐按钮右缘，`align='center'` 时相对按钮水平居中（音量弹窗）；优先显示在按钮上方，空间不足转下方，并夹在视口内。 |
+| `wheelVolume(deltaY)` / `showVolumeToast()` / `hideVolumeToast()` | 滚轮调音量：一格 5%（`VOL_WHEEL_STEP`），复用 `setVolume()`（自动取消静音 + 持久化）；`showVolumeToast()` 刷新 `#volToast` 的百分比/进度条/图标（0% 显示静音图标）并重置 1.4s（`VOL_TOAST_MS`）隐藏计时；`hideVolumeToast()` 在 `stopPlayback()` 中调用。 |
+| `toggleMute()` | 静音切换：`video.muted` 取反 → `syncVolumeUi()` → 持久化 → 复用 `showVolumeToast()` 提示（静音 0% + 静音图标）→ `fsShowUi()`。快捷键 `mute`（默认 `KeyM`）直接调用它，**不能**再走 `$('#mute').click()`。 |
+| `togglePlaySettingsPopover(anchor)` | 工具栏齿轮按钮的播放设置浮层：开关逻辑与字幕菜单一致（`wasHidden` 先取再 `hideAllPopovers()`，再点按钮即收起）；打开前 `syncPlaySettingsUi()` 刷新控件。点击外部关闭必须走**捕获阶段**监听并放行 `#playSettingsBtn/#playPop` 内部点击（同坑 15）；`ResizeObserver` 在高度变化后按锚点重定位。 |
+| `syncPlaySettingsUi()` / `reloadPlaySettings()` | 播放设置双 UI 同步：弹层（`pop*` 前缀 id）与设置弹窗各有一套控件，改值一律走 setter（`setAfterPlay/setResumePlay/...`）落盘后由 `syncPlaySettingsUi()` 按状态刷新两处，**不读 DOM 类名**避免漂移；`reloadPlaySettings()` 在「数据管理」清空设置后把内存 `settings/hwAccelOn` 重新按默认值读回并同步，防止清空后 UI 仍显示旧值。 |
 | `buildGroups/renderPlaylist/loadFile/fileUrl` | 列表分组渲染、文件载入、`file:///` URL 构造、自动播放静音回退。 |
 | `startAsrRun/toggleAsr/turnAsrOff` | 启动（等元数据→`startAsr`）、开关、关闭复位。 |
 | `updateAsrProgress/setStepState/setDeviceBadge/setAsrUi` | 阶段/进度/徽章/开关 UI。 |
@@ -560,6 +564,9 @@ npx electron-builder --win zip
 15. **点击外部关闭要用捕获阶段**：工具按钮的 `onclick` 普遍 `e.stopPropagation()`（避免触发展开态被立刻关掉），冒泡阶段的 document 监听收不到事件，导致「打开音量弹窗后点其他按钮不关闭」。现改为 `document.addEventListener('click', handler, true)`，并跳过 `#mute/#fsMute/#volPopover/#fsVolPopover` 内部点击。
 16. **字幕字号随视窗缩放**：固定 px 会让小窗口字幕显得过大、全屏显得过小；现按 `播放区高度 / 800` 缩放基础字号（0.5–2.5 夹取），配合 `em` 单位的内边距/圆角使字幕底衬等比放大。
 17. **界面内图标必须打包**：`build/icon.png` 需列入 `build.files` 才会进 asar；渲染层用相对路径 `../build/icon.png`（页面为 `src/index.html`，解析到 asar 根 `build/icon.png`），CSP 的 `default-src 'self'` 已覆盖 `img-src`。
+18. **滚轮音量提示不能放进 `.fs-ui`**：全屏 idle 时 `.fs-ui` 整体 `opacity:0`，若把提示挂在其中，滚轮调音量会在工具栏自动隐藏后一并消失。现 `#volToast` 作为 `#videoWrap` 的独立子节点（`z-index:90`、`pointer-events:none`），普通与全屏都用同一套逻辑与样式；滚轮监听挂 `window` 且 `{passive:false}`（需 `preventDefault` 阻止页面滚动），并以 `document.hasFocus()` 保证「窗口前台聚焦才生效」，同时在侧栏 / 弹窗 / 各类浮层内放行原生滚动。
+19. **音量按钮改职责后快捷键必须改指向**：音量按钮 `#mute` 的 `onclick` 已从「静音切换」改为「弹出音量子菜单」（`toggleVolumePopover`），但快捷键动作表里 `mute` 仍写着 `run: () => $('#mute').click()`，于是按 `M` 只开关弹窗、不静音（用户反馈的「静音键无效」根因）。现抽出独立的 `toggleMute()` 供快捷键调用；**凡把某按钮的点击语义改掉，必须同步检查 `HOTKEY_ACTIONS` 中借该按钮 `click()` 实现的动作**。全屏工具栏的 `#fsMute` 同样只负责弹窗。
+20. **同一批设置的第二套控件必须状态驱动**：播放设置同时存在于工具栏弹层（`pop*` id）与设置弹窗两处，若沿用旧写法（`el.classList.toggle('on')` 就地翻转 DOM 类再各自落盘），另一处不会跟着变。现改为 setter 落盘 → `syncPlaySettingsUi()` 按状态刷新两处；另外「数据管理 → 清除播放器设置 / 清除全部」只删 localStorage，内存里的 `settings/hwAccelOn` 不会自动归位，必须调 `reloadPlaySettings()`，否则清空后 UI 仍显示旧值。
 
 ---
 

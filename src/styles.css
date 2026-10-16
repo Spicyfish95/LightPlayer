@@ -56,6 +56,13 @@ button,input,select{font:inherit}
 .sp-actions .btn{flex:1;padding:7px 8px}
 #subPopover.cap-off .cap-style-sep{margin-top:0}
 
+/* ---------- 工具栏播放设置弹层（齿轮按钮，与字幕/音量/倍速同组同风格） ---------- */
+/* 沿用 .sub-popover 外观；行内含「自动定位上次观看位置」等长文案 + 右侧开关，故比字幕弹层略宽 */
+.play-pop{min-width:238px}
+/* 播放后操作下拉：内嵌在弹层行内，不能沿用 .select 的 width:100%（会撑满整行、把右侧列挤掉） */
+.play-pop .sp-select{width:auto;flex:none;padding:5px 8px;font-size:12.5px;border-radius:7px;cursor:pointer}
+.play-pop .sp-switch-row{cursor:default}
+
 /* ---------- 数据管理：紧凑按钮布局 / 确认弹窗 ---------- */
 .btn-row{display:flex;gap:8px;margin-top:10px}
 .btn-row .btn{flex:1}
@@ -123,6 +130,16 @@ button,input,select{font:inherit}
 .resume-toast button{border:0;background:transparent;color:#9d8cff;border-radius:6px;padding:4px 2px;font-size:12px;cursor:pointer;flex:none;text-decoration:underline;text-underline-offset:3px}
 .resume-toast button:hover{color:#c0b3ff}
 .resume-bar{position:absolute;left:0;bottom:0;height:2px;background:var(--accent);display:block}
+/* 滚轮调音量提示：播放区正中（避开底部字幕与顶部信息栏），全屏同样显示。
+   刻意不放进 .fs-ui：全屏 idle 时 .fs-ui 会整体透明隐藏，而音量提示必须照常可见。 */
+.vol-toast{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:90;display:flex;align-items:center;gap:9px;min-width:126px;padding:10px 16px 13px;border:1px solid #35405a;border-radius:12px;background:rgba(10,14,22,.86);color:#fff;backdrop-filter:blur(8px);box-shadow:0 12px 34px rgba(0,0,0,.55);pointer-events:none;overflow:hidden;animation:volToastIn .16s ease-out}
+.vol-toast.hidden{display:none!important}
+.vol-toast .vt-ico{display:inline-flex;color:#c6d0e2;flex:none}
+.vol-toast .vt-ico .ic{width:17px;height:17px}
+.vol-toast .vt-val{flex:1;text-align:right;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+.vol-toast .vt-bar{position:absolute;left:0;right:0;bottom:0;height:3px;display:block;background:rgba(255,255,255,.14)}
+.vol-toast .vt-bar b{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--cyan));transition:width .12s linear}
+@keyframes volToastIn{from{opacity:0;transform:translate(-50%,-50%) scale(.94)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
 /* 快捷键配置行 */
 .hotkey-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;font-size:12.5px;color:#aab6ca;border-bottom:1px solid #17202f}
 .hotkey-key{min-width:96px;padding:5px 10px;border:1px solid var(--line);border-radius:7px;background:#0d1320;color:#c6d0e2;font-size:12px;cursor:pointer;text-align:center}
