@@ -56,9 +56,9 @@ app.innerHTML = `
     <div class="menu-group" id="themeMenuGroup">
       <span class="mg-label">主题</span><span class="menu-arrow">${icon('chevron')}</span>
       <div class="sub-menu">
-        <div class="menu-item menu-item-radio" data-theme="dark"><span>暗色</span><span class="mi-check" hidden>${icon('check')}</span></div>
-        <div class="menu-item menu-item-radio" data-theme="light"><span>亮色</span><span class="mi-check" hidden>${icon('check')}</span></div>
-        <div class="menu-item menu-item-radio" data-theme="system"><span>跟随系统</span><span class="mi-check" hidden>${icon('check')}</span></div>
+        <div class="menu-item menu-item-radio" data-theme="dark"><span class="mi-label">暗色</span><span class="mi-check" hidden>${icon('check')}</span></div>
+        <div class="menu-item menu-item-radio" data-theme="light"><span class="mi-label">亮色</span><span class="mi-check" hidden>${icon('check')}</span></div>
+        <div class="menu-item menu-item-radio" data-theme="system"><span class="mi-label">跟随系统</span><span class="mi-check" hidden>${icon('check')}</span></div>
       </div>
     </div>
     <div class="menu-item" data-modal="data">数据管理</div>

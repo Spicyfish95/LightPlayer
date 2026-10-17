@@ -398,14 +398,15 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 #themeMenuHost .app-menu,#themeMenuHost .sub-menu{pointer-events:auto}
 
 /* ---------- 主题：菜单单选勾选标记 ---------- */
-/* 勾选标记的占位宽度用 min-width 固定：未选中项用 visibility:hidden 隐藏但仍占位，
-   选中切换时三项文字不会左右跳动。 */
+/* 每一项都是 [标签][勾选位] 的两段结构：标签用 flex:1 占满整行剩余宽度，
+   勾选位固定在最右侧。这样无论标签是两个字还是四个字，三项的文字都从同一行首开始、由同一白色基线渲染，
+   不会再出现「只有某一项看着发灰」的差异。 */
+.menu-item-radio .mi-label{flex:1;min-width:0;display:block;color:inherit}
 .menu-item-radio .mi-check{display:inline-flex;align-items:center;justify-content:flex-end;min-width:14px;flex:none}
 .menu-item-radio .mi-check .ic{width:14px;height:14px}
 .menu-item-radio .mi-check[hidden]{display:inline-flex;visibility:hidden}
-/* 三项文字颜色一律固定为 --item-text，不因选中差异而改变。
-   优先级链：.menu-item-radio.active > .menu-item:hover > .menu-item，
-   因此必须显式写出 4 条规则，否则选中项会命中不同的颜色。 */
+/* 三项文字颜色一律固定为 --item-text，不因选中与否改变；悬停时统一提亮。
+   优先级链：.menu-item-radio.active > .menu-item:hover > .menu-item，因此四条规则要显式写全。 */
 .menu-item-radio,
 .menu-item-radio.active,
 .menu-item-radio:hover,
