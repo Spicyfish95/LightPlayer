@@ -413,7 +413,7 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 [data-theme="light"] .center-toast{background:rgba(18,23,33,.9);border-color:rgba(255,255,255,.14)}
 [data-theme="light"] .top-chip{background:rgba(18,23,33,.72);border-color:rgba(255,255,255,.16);color:#d7deea}
 [data-theme="light"] .resume-toast{background:rgba(18,23,33,.9);border-color:rgba(255,255,255,.14);color:#e3e9f2}
-/* 全屏目录面板与音量弹层的深色浮层样式见「全屏工具栏」段尾（不加主题限定，两种主题同一外观） */
+/* 全屏目录面板/音量弹层跟随主题令牌，投影见「全屏工具栏」段尾 */
 /* 模态遮罩与投影在亮色下略夸阴影强度，层次更清楚 */
 [data-theme="light"] .modal-overlay{background:rgba(30,40,58,.35)}
 [data-theme="light"] .app-menu,[data-theme="light"] .sub-menu,[data-theme="light"] .sub-popover,
