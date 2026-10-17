@@ -17,6 +17,7 @@ const ICONS = {
   folder: '<path d="M3.5 7a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
   panel: '<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M15 4.5v15"/>',
   chevron: '<path d="m6 9 6 6 6-6"/>',
+  palette: '<path d="M12 3.2a8.8 8.8 0 1 0 0 17.6c1.2 0 1.9-.8 1.9-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.7 1.8-1.7h1.6a4.5 4.5 0 0 0 4.5-4.5c0-4-4-7.2-8.8-7.2z"/><circle cx="7.6" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="9.8" cy="8.4" r="1" fill="currentColor" stroke="none"/><circle cx="14.2" cy="8.4" r="1" fill="currentColor" stroke="none"/><circle cx="16.4" cy="12" r="1" fill="currentColor" stroke="none"/>',
   min: '<path d="M5 12h14"/>',
   max: '<rect x="5" y="5" width="14" height="14" rx="2"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
@@ -66,6 +67,13 @@ app.innerHTML = `
     <div class="menu-item" data-modal="about">关于</div>
   </div>
   <span class="title" id="windowTitle">本地视频播放器</span>
+  <div class="theme-quick" id="themeQuickPop" hidden>
+    <div class="sp-group-label">主题</div>
+    <div class="sp-item sp-check-row" data-theme-mode="dark"><span>暗色</span><span class="sp-check" hidden>${icon('check')}</span></div>
+    <div class="sp-item sp-check-row" data-theme-mode="light"><span>亮色</span><span class="sp-check" hidden>${icon('check')}</span></div>
+    <div class="sp-item sp-check-row" data-theme-mode="system"><span>跟随系统</span><span class="sp-check" hidden>${icon('check')}</span></div>
+  </div>
+  <button class="theme-quick-btn" id="themeQuickBtn" title="主题">${icon('palette')}</button>
   <div class="window-actions"><button id="minBtn" title="最小化">${icon('min')}</button><button id="maxBtn" title="最大化/还原">${icon('max')}</button><button class="close" id="closeBtn" title="关闭">${icon('close')}</button></div>
 </header>
 <div class="layout" id="layout">
@@ -396,6 +404,13 @@ function applyTheme() {
     const mark = item.querySelector('.mi-check');
     if (mark) mark.hidden = !on;
   });
+  // 标题栏快捷主题弹窗与左上角菜单的「主题」共用同一份状态，这里一并刷新勾选
+  document.querySelectorAll('#themeQuickPop .sp-item[data-theme-mode]').forEach(item => {
+    const on = item.dataset.themeMode === themeMode;
+    item.classList.toggle('active', on);
+    const mark = item.querySelector('.sp-check');
+    if (mark) mark.hidden = !on;
+  });
   try { window.lightPlayer.setThemeMode(themeMode); } catch (_) {}   // 同步原生主题来源（标题栏/弹窗）
 }
 function setThemeMode(mode) {
@@ -411,6 +426,24 @@ function setThemeMode(mode) {
  */
 document.querySelectorAll('#appMenu .menu-item-radio[data-theme-mode]').forEach(item => {
   item.onclick = e => { e.stopPropagation(); setThemeMode(item.dataset.themeMode); $('#appMenu').classList.add('hidden'); };
+});
+/* 标题栏右侧「快捷主题」按钮：点击在按钮下方弹出主题选项，选完即收起。
+   与左上角菜单里的「主题」二级菜单读写同一份 themeMode，任一处修改另一处同步。 */
+function setThemeQuickOpen(open) {
+  const pop = $('#themeQuickPop');
+  pop.hidden = !open;
+  $('#themeQuickBtn').classList.toggle('on', open);
+}
+$('#themeQuickBtn').onclick = e => { e.stopPropagation(); setThemeQuickOpen($('#themeQuickPop').hidden); };
+$('#themeQuickPop').onclick = e => {
+  e.stopPropagation();
+  const item = e.target.closest('.sp-item[data-theme-mode]');
+  if (!item) return;
+  setThemeMode(item.dataset.themeMode);
+  setThemeQuickOpen(false);
+};
+document.addEventListener('click', e => {
+  if (!e.target.closest('#themeQuickBtn') && !e.target.closest('#themeQuickPop')) setThemeQuickOpen(false);
 });
 try {  window.lightPlayer.getSystemTheme().then(v => { systemDark = !!(v && v.dark); applyTheme(); }).catch(() => {});
   window.lightPlayer.onSystemThemeChange(dark => { systemDark = dark; if (themeMode === 'system') applyTheme(); });
@@ -871,9 +904,28 @@ $('#fsPanelBtn').onclick = e => {
   hideSpeedMenus();
   $('#subPopover').classList.add('hidden');
   const p = $('#fsPlaylist');
-  if (p.classList.contains('hidden')) { renderFsPlaylist(); p.classList.remove('hidden'); fsSetPopover(true); }
-  else { p.classList.add('hidden'); fsSetPopover(false); }
+  if (p.classList.contains('hidden')) {
+    renderFsPlaylist();
+    p.classList.remove('hidden');
+    fsSetPopover(true);
+    scrollFsPlaylistToActive();   // 当前播放项不在视野内时滚到中央
+  } else { p.classList.add('hidden'); fsSetPopover(false); }
 };
+// 全屏目录面板打开后，确保正在播放的文件处于面板可见区域中部。
+// 已在视野内则不动（避免每次打开都无意义地滚动）；
+// 面板刚取消 hidden，此时列表已可布局，直接读 scrollHeight 即准确，无需等 rAF。
+function scrollFsPlaylistToActive() {
+  const body = $('#fsPlBody');
+  const el = body && body.querySelector('.fs-pl-item.active');
+  if (!el) return;
+  const elTop = el.offsetTop - body.offsetTop;   // 相对 body 滚动内容的顶部
+  const elBottom = elTop + el.offsetHeight;
+  const viewTop = body.scrollTop;
+  const viewBottom = viewTop + body.clientHeight;
+  if (viewBottom - viewTop >= body.scrollHeight) return;   // 内容不超高，无滚动可言
+  if (elTop >= viewTop && elBottom <= viewBottom) return;  // 已经完整可见
+  body.scrollTop = Math.max(0, elTop - (body.clientHeight - el.offsetHeight) / 2);
+}
 $('#fsPlClose').onclick = e => { e.stopPropagation(); $('#fsPlaylist').classList.add('hidden'); };
 $('#fsPlBody').onclick = e => {
   const it = e.target.closest('.fs-pl-item'); if (!it) return;
@@ -1347,7 +1399,7 @@ function closeModals() {
     m.classList.add('hidden');
   });
 }
-$('#brandBtn').onclick = e => { e.stopPropagation(); $('#appMenu').classList.toggle('hidden'); };
+$('#brandBtn').onclick = e => { e.stopPropagation(); setThemeQuickOpen(false); $('#appMenu').classList.toggle('hidden'); };
 document.addEventListener('click', e => {
   if (!e.target.closest('#brandBtn') && !e.target.closest('#appMenu')) $('#appMenu').classList.add('hidden');
   if (!e.target.closest('#speed') && !e.target.closest('#speedMenu')) $('#speedMenu').classList.add('hidden');

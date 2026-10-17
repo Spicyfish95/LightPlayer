@@ -51,6 +51,16 @@ button,input,select{font:inherit}
 .menu-item-switch:hover{background:transparent;color:var(--item-text)}
 .menu-item-switch .switch{cursor:pointer}
 
+/* ---------- 标题栏快捷主题按钮与弹窗（位于右侧窗口按钮组左边） ---------- */
+.theme-quick-btn{width:32px;height:32px;margin-left:auto;border:0;border-radius:8px;background:transparent;color:var(--muted);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none;position:relative;-webkit-app-region:no-drag;transition:background .15s,color .15s}
+.theme-quick-btn .ic{width:17px;height:17px}
+.theme-quick-btn:hover{background:var(--hover);color:var(--item-text-strong)}
+.theme-quick-btn.on{color:var(--accent);background:var(--accent-soft)}
+/* 弹窗挂在标题栏内，标题栏是拖动区：必须显式声明 no-drag，否则点击选项会被当成拖窗口 */
+.theme-quick{position:absolute;top:40px;right:112px;z-index:150;min-width:150px;padding:6px;background:var(--bar2);border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.55);-webkit-app-region:no-drag}
+.theme-quick[hidden]{display:none}
+.theme-quick .sp-item{padding:8px 10px}
+
 /* ---------- 工具栏字幕弹出菜单（普通/全屏共用，fixed 随按钮定位） ---------- */
 .sub-popover{position:fixed;z-index:320;min-width:210px;background:var(--bar2);border:1px solid var(--line);border-radius:12px;padding:8px;box-shadow:0 14px 40px rgba(0,0,0,.55)}
 .sp-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font-size:13px;color:var(--item-text);cursor:pointer;user-select:none}
