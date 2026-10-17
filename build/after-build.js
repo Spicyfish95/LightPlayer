@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const INTERMEDIATE = ['win-unpacked', 'builder-debug.yml'];
+const INTERMEDIATE = ['win-unpacked', 'builder-debug.yml', 'builder-effective-config.yaml'];
 
 // asar 内需要压缩混淆的文件（按扩展名分派处理方式）
 const MANGLE_EXTS = new Set(['.js', '.css', '.html']);
