@@ -51,8 +51,10 @@ button,input,select{font:inherit}
 .menu-item-switch:hover{background:transparent;color:var(--item-text)}
 .menu-item-switch .switch{cursor:pointer}
 
-/* ---------- 标题栏快捷主题按钮与弹窗（位于右侧窗口按钮组左边） ---------- */
-.theme-quick-btn{width:32px;height:32px;margin-left:auto;border:0;border-radius:8px;background:transparent;color:var(--muted);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none;position:relative;-webkit-app-region:no-drag;transition:background .15s,color .15s}
+/* ---------- 标题栏快捷主题按钮与弹窗（紧贴右侧窗口按钮组左边） ---------- */
+/* 用 margin-left:auto 把按钮连同窗口按钮组一起推到右侧，再靠 .window-actions 的
+   margin-left:8px 控制两者间距——若给窗口按钮组本身加 auto 外边距，两者会被拉开一大截。 */
+.theme-quick-btn{width:32px;height:32px;border:0;border-radius:8px;background:transparent;color:var(--muted);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none;position:relative;margin-left:auto;-webkit-app-region:no-drag;transition:background .15s,color .15s}
 .theme-quick-btn .ic{width:17px;height:17px}
 .theme-quick-btn:hover{background:var(--hover);color:var(--item-text-strong)}
 .theme-quick-btn.on{color:var(--accent);background:var(--accent-soft)}
@@ -130,7 +132,8 @@ button,input,select{font:inherit}
 .btn.danger{border-color:rgba(185,54,77,.5);color:var(--danger-text)}
 .btn.danger:hover{background:var(--danger-soft);border-color:var(--danger)}
 .title{margin-left:24px;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.window-actions{display:flex;margin-left:auto;-webkit-app-region:no-drag}
+/* 右侧推到边缘的 margin-left:auto 已交给前面的快捷主题按钮；这里只负责与它之间的小间距 */
+.window-actions{display:flex;margin-left:8px;-webkit-app-region:no-drag}
 .window-actions button{width:42px;height:32px;border:0;background:transparent;color:var(--muted);display:grid;place-items:center;cursor:pointer;border-radius:6px}
 .window-actions .ic{width:16px;height:16px}
 .window-actions button:hover{background:var(--hover);color:var(--item-text-strong)}
