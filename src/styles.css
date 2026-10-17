@@ -176,11 +176,14 @@ button,input,select{font:inherit}
 /* ---------- 控制条 ---------- */
 .controls{padding:8px 14px 14px;background:var(--bar);border-top:1px solid var(--line);position:relative}
 .progress{position:relative;height:16px;display:flex;align-items:center}
-/* 已播放段：与全屏 .fs-fill 相同的强调色→青色渐变（见 .fs-progress .fs-fill） */
-.progress .fill{position:absolute;left:0;height:4px;background:linear-gradient(90deg,var(--accent),var(--cyan));border-radius:2px;width:0;pointer-events:none}
+/* 已播放段：与全屏 .fs-fill 相同的强调色→青色渐变（见 .fs-progress .fs-fill）。
+   z-index:2 —— 必须压在原生 range 轨道之上；否则 #seek 的 ::-webkit-slider-runnable-track
+   会把整条轨道铺满盖住，看起来就只剩一根单色条（左右永远没区别）。 */
+.progress .fill{position:absolute;left:0;top:50%;transform:translateY(-50%);z-index:2;height:4px;background:linear-gradient(90deg,#7c5cff,#25d0d2);border-radius:2px;width:0;pointer-events:none}
 input[type=range]{-webkit-appearance:none;appearance:none;background:transparent;cursor:pointer;padding:0;margin:0}
 #seek{width:100%;position:relative;z-index:1}
-#seek::-webkit-slider-runnable-track{height:4px;background:var(--track);border-radius:2px}
+/* 未播放段（轨道）：比已播放段暗一档，让渐变段一眼可辨 */
+#seek::-webkit-slider-runnable-track{height:4px;background:#2b3550;border-radius:2px}
 /* 非全屏进度条与全屏保持同一套观感：已播放段由 .fill 的强调色→青色渐变绘制，
    滑块固定白色、悬停略微放大，和 #fsSeek 的 13px 滑块对齐 */
 #seek::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:#fff;margin-top:-4.5px;box-shadow:0 1px 4px rgba(0,0,0,.5);transition:transform .12s}
@@ -351,7 +354,8 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 .fs-title{flex:1;min-width:0;font-size:14px;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 6px rgba(0,0,0,.6)}
 .fs-bottom{position:absolute;left:0;right:0;bottom:0;padding:40px 20px 16px;background:linear-gradient(0deg,rgba(0,0,0,.8),rgba(0,0,0,.35) 45%,rgba(0,0,0,0));pointer-events:auto}
 .fs-progress{position:relative;height:16px;display:flex;align-items:center}
-.fs-progress .fs-fill{position:absolute;left:0;height:4px;background:linear-gradient(90deg,var(--accent),var(--cyan));border-radius:2px;width:0;pointer-events:none}
+/* 同 .progress .fill：渐变色写死，且 z-index:2 盖在原生轨道之上 */
+.fs-progress .fs-fill{position:absolute;left:0;top:50%;transform:translateY(-50%);z-index:2;height:4px;background:linear-gradient(90deg,#7c5cff,#25d0d2);border-radius:2px;width:0;pointer-events:none}
 .fs-row{display:flex;align-items:center;gap:6px;margin-top:4px}
 .fs-btn{height:36px;min-width:38px;padding:0 8px;border:0;border-radius:9px;background:transparent;color:#eef2f8;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:13px;transition:background .15s,color .15s}
 /* 悬停：暗底上提亮背景 + 保持白字（不能引用随主题翻转的 --item-text-strong） */
