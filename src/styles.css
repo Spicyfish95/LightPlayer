@@ -398,14 +398,18 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 .fs-pl-item.active{background:var(--accent-soft2);color:var(--accent-text)}
 
 /* ---------- 主题：菜单单选勾选标记 ---------- */
-/* 标记位始终占位（visibility 切换而非 display:none），三个选项文字左右对齐不跳动 */
-.menu-item-radio .mi-check{display:inline-flex;align-items:center;color:var(--accent);flex:none}
+/* 三项文字颜色一律由 .menu-item-radio 系列规则写死为 --item-text（见下方），不受选中态影响。
+   勾选标记的占位宽度用 min-width 固定：display:none 的话选中项会比其它项多出一个图标宽度而跳行；
+   这里对未选中项用 visibility:hidden 隐藏，占位与选中项完全一致。 */
+.menu-item-radio .mi-check{display:inline-flex;align-items:center;justify-content:flex-end;min-width:14px;color:var(--accent);flex:none}
 .menu-item-radio .mi-check .ic{width:14px;height:14px}
 .menu-item-radio .mi-check[hidden]{display:inline-flex;visibility:hidden}
 /* 选中项不加颜色强调：三个选项文字同色，只靠右侧勾选标记区分；
-   否则强调色（--accent-text 偏淡紫）在暗色下会显得发灰。 */
+   否则强调色（--accent-text 偏淡紫）在暗色下会显得发灰。
+   注意三条规则必须同优先级同顺序书写，否则选中的那一项会拿到不同的颜色。 */
 .menu-item-radio,
 .menu-item-radio.active,
+.menu-item-radio:hover,
 .menu-item-radio.active:hover{color:var(--item-text)}
 .menu-item-radio:hover,
 .menu-item-radio.active:hover{color:var(--item-text-strong)}
