@@ -15,7 +15,7 @@
     "appId": "com.lightplayer.desktop",
     "productName": "LightPlayer",
     "npmRebuild": false,
-    "compression": "maximum",
+    "compression": "normal",
     "electronLanguages": [
       "zh-CN",
       "en-US"
