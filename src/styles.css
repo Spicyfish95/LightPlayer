@@ -184,6 +184,8 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 #seek{width:100%;position:relative;z-index:1}
 /* 未播放段（轨道）：比已播放段暗一档，让渐变段一眼可辨 */
 #seek::-webkit-slider-runnable-track{height:4px;background:#2b3550;border-radius:2px}
+/* 亮色主题下未播放段改为浅灰（深色主题仍用 #2b3550），与白底工具栏协调 */
+[data-theme="light"] #seek::-webkit-slider-runnable-track{background:#c3ccda}
 /* 非全屏进度条与全屏保持同一套观感：已播放段由 .fill 的强调色→青色渐变绘制，
    滑块固定白色、悬停略微放大，和 #fsSeek 的 13px 滑块对齐 */
 #seek::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:#fff;margin-top:-4.5px;box-shadow:0 1px 4px rgba(0,0,0,.5);transition:transform .12s}
