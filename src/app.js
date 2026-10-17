@@ -152,7 +152,8 @@ app.innerHTML = `
       <button class="ctrl" id="back" title="后退 10 秒">${icon('back10')}</button>
       <button class="ctrl primary" id="play" title="播放/暂停">${icon('play')}</button>
       <button class="ctrl" id="forward" title="快进 10 秒">${icon('forward10')}</button>
-      <span class="time" id="time">00:00 / 00:00</span>
+      <span class="time time-jump" id="time" title="点击输入时间跳转">00:00 / 00:00</span>
+      <span class="time-jump-editor hidden" id="timeJumpEditor"><input type="text" id="timeJumpInput" spellcheck="false" placeholder="如 90 或 1:30"></span>
       <div class="spacer"></div>
       <button class="ctrl" id="mute" title="音量 / 静音">${icon('volume')}</button>
       <button class="ctrl" id="speed" title="播放倍速">1×</button>
@@ -1007,9 +1008,67 @@ video.ontimeupdate = () => {
   $('#fill').style.width = p * 100 + '%'; $('#seek').value = p * 1000;
   $('#fsFill').style.width = p * 100 + '%'; $('#fsSeek').value = p * 1000;
   const t = fmt(video.currentTime) + ' / ' + fmt(video.duration);
-  $('#time').textContent = t; $('#fsTime').textContent = t;
+  if ($('#timeJumpEditor').classList.contains('hidden')) $('#time').textContent = t;   // 编辑中不刷新显示
+  $('#fsTime').textContent = t;
   displayCurrentCaption();
 };
+
+/* ---------- 点击时间跳转（工具栏「当前时间 / 总时长」文字）：点开内嵌输入框，回车跳转 ---------- */
+// 输入格式：「数字」= 秒（如 90 → 1:30）；「时:分[:秒]」按 冒号分隔的时长 解析（1:30 → 90 秒，1:02:03 → 1 小时 2 分 3 秒）。
+// 越界（负数或超过视频时长）不跳转，仅 toast 提示；未更改/空输入直接关闭输入框。
+function showToast(text) {
+  $('#resumeToastText').textContent = text;
+  const toast = $('#resumeToast');
+  toast.classList.remove('hidden');
+  const bar = $('#resumeBar');
+  bar.style.transition = 'none'; bar.style.width = '100%';
+  void bar.offsetWidth;
+  bar.style.transition = 'width 3s linear'; bar.style.width = '0%';
+  clearTimeout(resumeToastTimer);
+  resumeToastTimer = setTimeout(() => toast.classList.add('hidden'), 3000);
+}
+function parseTimeInput(raw) {
+  const s = String(raw).trim();
+  if (!s) return null;
+  if (s.includes(':')) {
+    const parts = s.split(':').map(x => x.trim());
+    if (parts.length > 3 || parts.some(x => x === '' || !/^\d+$/.test(x))) return NaN;
+    let sec = 0;
+    for (const part of parts) sec = sec * 60 + Number(part);
+    return sec;
+  }
+  if (!/^\d+(\.\d+)?$/.test(s)) return NaN;
+  return parseFloat(s);
+}
+function closeTimeJumpEditor() {
+  $('#timeJumpEditor').classList.add('hidden');
+  $('#time').classList.remove('hidden');
+  $('#time').textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration);
+}
+$('#time').onclick = () => {
+  if (!activeFile || !isFinite(video.duration) || video.duration <= 0) return;
+  $('#time').classList.add('hidden');
+  const editor = $('#timeJumpEditor');
+  editor.classList.remove('hidden');
+  const input = $('#timeJumpInput');
+  input.value = fmt(video.currentTime);   // 默认填当前播放时间
+  input.focus(); input.select();
+};
+function commitTimeJump() {
+  const parsed = parseTimeInput($('#timeJumpInput').value);
+  closeTimeJumpEditor();
+  if (parsed === null) return;                 // 空输入：无操作
+  if (!isFinite(parsed)) { showToast('时间格式无效，支持 90 或 1:30'); return; }
+  if (parsed < 0 || parsed > video.duration) { showToast(`超出范围：0 ~ ${fmt(video.duration)}`); return; }
+  if (Math.abs(parsed - video.currentTime) < 0.05) return;   // 未更改：无操作
+  video.currentTime = parsed;
+  syncAsrPosition();
+}
+$('#timeJumpInput').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); commitTimeJump(); } else if (e.key === 'Escape') closeTimeJumpEditor(); };
+// 点击输入框本身不关闭（冒泡被弹层规则拦截）；点击工具栏其他区域 = 提交跳转
+$('#timeJumpEditor').onclick = e => e.stopPropagation();
+$('#timeJumpInput').onclick = e => e.stopPropagation();
+$('#timeJumpInput').onblur = () => commitTimeJump();
 video.onplay = () => { setPlayIcon(); fsShowUi(); }; video.onpause = () => { setPlayIcon(); videoWrap.classList.remove('fs-idle'); clearTimeout(fsIdleTimer); };
 video.onloadedmetadata = () => $('#fileMeta').textContent = fmt(video.duration) + ' · ' + (video.videoWidth || '') + '×' + (video.videoHeight || '');
 video.onseeked = () => { displayCurrentCaption(); if ($('#asrSwitch').classList.contains('on') && activeFile) window.lightPlayer.seekAsr({ start: video.currentTime, rate: video.paused ? 0 : video.playbackRate, seek: true }); };

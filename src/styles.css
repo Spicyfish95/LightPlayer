@@ -172,6 +172,15 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 .ctrl.primary{width:44px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--cyan));color:#fff}
 .ctrl.primary .ic{width:22px;height:22px}
 .time{color:var(--muted);font-size:12px;margin:0 8px;white-space:nowrap}
+/* 点击时间跳转：时间文字可点，编辑框内嵌在工具栏原位置，风格与工具栏一致 */
+.time-jump{cursor:pointer;font-variant-numeric:tabular-nums;border-radius:6px;padding:2px 4px;margin:0 4px;transition:color .15s,background .15s}
+.time-jump:hover{color:var(--text);background:rgba(255,255,255,.07)}
+.time-jump.hidden{display:none}
+.time-jump-editor{display:inline-flex;align-items:center;margin:0 4px}
+.time-jump-editor.hidden{display:none}
+.time-jump-editor input{width:92px;padding:3px 8px;background:#0d1320;border:1px solid var(--line);border-radius:6px;color:var(--text);font-size:12px;font-variant-numeric:tabular-nums;outline:none;transition:border-color .15s}
+.time-jump-editor input:focus{border-color:var(--accent)}
+.time-jump-editor input::placeholder{color:var(--muted)}
 .spacer{flex:1}
 
 /* ---------- 音量子菜单（普通工具栏 / 全屏工具栏共用样式：竖向滑杆 + 音量百分比） ---------- */
