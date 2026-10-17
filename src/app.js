@@ -986,8 +986,8 @@ function onSpeedPick(e) {
   hideSpeedMenus();
   syncAsrPosition();
 }
-$('#speed').onclick = e => { e.stopPropagation(); const open = $('#speedMenu').classList.contains('hidden'); hideAllPopovers(); renderSpeedMenu(); if (open) positionFloatingPopover($('#speedMenu'), $('#speed')); };
-$('#fsSpeedBtn').onclick = e => { e.stopPropagation(); const open = $('#fsSpeedMenu').classList.contains('hidden'); hideAllPopovers(); renderSpeedMenu(); if (open) positionFloatingPopover($('#fsSpeedMenu'), $('#fsSpeedBtn')); };
+$('#speed').onclick = e => { e.stopPropagation(); const open = $('#speedMenu').classList.contains('hidden'); hideAllPopovers(); renderSpeedMenu(); if (open) positionFloatingPopover($('#speedMenu'), $('#speed'), "center"); };
+$('#fsSpeedBtn').onclick = e => { e.stopPropagation(); const open = $('#fsSpeedMenu').classList.contains('hidden'); hideAllPopovers(); renderSpeedMenu(); if (open) positionFloatingPopover($('#fsSpeedMenu'), $('#fsSpeedBtn'), "center"); };
 $('#speedMenu').onclick = onSpeedPick;
 $('#fsSpeedMenu').onclick = onSpeedPick;
 document.addEventListener('click', e => {
