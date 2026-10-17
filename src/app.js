@@ -330,6 +330,7 @@ let subtitles = [];        // [{start,end,text,asr?}]
 let activeFile = '';
 let playlist = [];
 let expandedGroups = new Set();   // 默认折叠，仅记录用户手动展开的目录
+let manuallyCollapsed = new Set(); // 用户手动折叠的目录（优先于当前播放目录的自动展开，切换视频后清除）
 
 /* ---------- 会话持久化（音量 / 播放列表 / 播放进度 / 设置开关） ---------- */
 const store = {
@@ -459,9 +460,9 @@ function renderPlaylist() {
   if (!playlist.length) { box.innerHTML = '<div class="pl-empty">添加文件夹后显示视频</div>'; return; }
   const groups = buildGroups();
   box.innerHTML = groups.map(g => {
-    // 当前播放文件所在目录保持展开，其余默认折叠（用户点开过的记录在 expandedGroups）
+    // 当前播放文件所在目录自动展开，其余默认折叠（用户点开过的记录在 expandedGroups；手动折叠优先，切换视频后失效）
     const activeDir = activeFile ? activeFile.replace(/[\\/][^\\/]+$/, '') || '/' : '';
-    const expanded = expandedGroups.has(g.dir) || g.dir === activeDir;
+    const expanded = manuallyCollapsed.has(g.dir) ? expandedGroups.has(g.dir) : (expandedGroups.has(g.dir) || g.dir === activeDir);
     const name = g.dir.split(/[\\/]/).pop() || g.dir;
     return `<div class="pl-group">
       <div class="pl-group-head" title="${escapeHtml(g.dir)}">
@@ -477,7 +478,7 @@ function renderPlaylist() {
     </div>`;
   }).join('');
   box.querySelectorAll('.pl-group-head').forEach((head, i) => {
-    head.onclick = () => { const dir = groups[i].dir; expandedGroups.has(dir) ? expandedGroups.delete(dir) : expandedGroups.add(dir); renderPlaylist(); };
+    head.onclick = () => { const dir = groups[i].dir; if (expandedGroups.has(dir)) { expandedGroups.delete(dir); manuallyCollapsed.add(dir); } else { expandedGroups.add(dir); manuallyCollapsed.delete(dir); } renderPlaylist(); };
   });
   box.querySelectorAll('.pl-remove').forEach(btn => {
     btn.onclick = e => {
@@ -564,6 +565,7 @@ function loadFile(file, opts = {}) {
   $('#asrStageLabel').textContent = '准备中'; $('#asrPercent').textContent = '0%'; $('#asrBar').style.width = '0%'; $('#asrMessage').textContent = '';
   $('#caption').classList.add('hidden');
   activeFile = file; subtitles = [];
+  manuallyCollapsed.clear();   // 切换视频后清除手动折叠，恢复当前目录自动展开
   video.src = fileUrl(file);
   video.load(); setPlayIcon();   // load() 不触发 pause 事件，需手动同步图标
   empty.classList.add('hidden'); $('#qualityChip').classList.remove('hidden');

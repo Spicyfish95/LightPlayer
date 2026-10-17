@@ -15,9 +15,16 @@
     "appId": "com.lightplayer.desktop",
     "productName": "LightPlayer",
     "npmRebuild": false,
+    "compression": "maximum",
+    "electronLanguages": [
+      "zh-CN",
+      "en-US"
+    ],
     "directories": {
       "output": "dist"
     },
+    "beforePack": "build/after-build.js",
+    "afterPack": "build/after-build.js",
     "afterAllArtifactBuild": "build/after-build.js",
     "files": [
       "src/**/*",
