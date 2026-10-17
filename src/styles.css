@@ -393,15 +393,9 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 .fs-pl-item:hover{background:var(--hover2);color:var(--item-text-strong)}
 .fs-pl-item.active{background:var(--accent-soft2);color:var(--accent-text)}
 
-/* 菜单图层容器：本身不参与布局、不产生背景，只是把菜单从 <body> 全局层里隔离出来 */
-#themeMenuHost{position:fixed;left:0;top:0;width:0;height:0;z-index:400;pointer-events:none}
-#themeMenuHost .app-menu,#themeMenuHost .sub-menu{pointer-events:auto}
-
 /* ---------- 主题：菜单单选勾选标记 ---------- */
-/* 每一项都是 [标签][勾选位] 的两段结构：标签用 flex:1 占满整行剩余宽度，
-   勾选位固定在最右侧。这样无论标签是两个字还是四个字，三项的文字都从同一行首开始、由同一白色基线渲染，
-   不会再出现「只有某一项看着发灰」的差异。 */
-.menu-item-radio .mi-label{flex:1;min-width:0;display:block;color:inherit}
+/* 勾选标记的占位宽度用 min-width 固定：未选中项用 visibility:hidden 隐藏但仍占位，
+   选中切换时三项文字不会左右跳动。 */
 .menu-item-radio .mi-check{display:inline-flex;align-items:center;justify-content:flex-end;min-width:14px;flex:none}
 .menu-item-radio .mi-check .ic{width:14px;height:14px}
 .menu-item-radio .mi-check[hidden]{display:inline-flex;visibility:hidden}

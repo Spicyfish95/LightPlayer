@@ -56,9 +56,9 @@ app.innerHTML = `
     <div class="menu-group" id="themeMenuGroup">
       <span class="mg-label">主题</span><span class="menu-arrow">${icon('chevron')}</span>
       <div class="sub-menu">
-        <div class="menu-item menu-item-radio" data-theme="dark"><span class="mi-label">暗色</span><span class="mi-check" hidden>${icon('check')}</span></div>
-        <div class="menu-item menu-item-radio" data-theme="light"><span class="mi-label">亮色</span><span class="mi-check" hidden>${icon('check')}</span></div>
-        <div class="menu-item menu-item-radio" data-theme="system"><span class="mi-label">跟随系统</span><span class="mi-check" hidden>${icon('check')}</span></div>
+        <div class="menu-item menu-item-radio" data-theme-mode="dark"><span>暗色</span><span class="mi-check" hidden>${icon('check')}</span></div>
+        <div class="menu-item menu-item-radio" data-theme-mode="light"><span>亮色</span><span class="mi-check" hidden>${icon('check')}</span></div>
+        <div class="menu-item menu-item-radio" data-theme-mode="system"><span>跟随系统</span><span class="mi-check" hidden>${icon('check')}</span></div>
       </div>
     </div>
     <div class="menu-item" data-modal="data">数据管理</div>
@@ -391,7 +391,7 @@ function applyTheme() {
   const meta = document.querySelector('meta[name="color-scheme"]');
   if (meta) meta.setAttribute('content', actual);
   document.querySelectorAll('#appMenu .menu-item-radio').forEach(item => {
-    const on = item.dataset.theme === themeMode;
+    const on = item.dataset.themeMode === themeMode;
     item.classList.toggle('active', on);
     const mark = item.querySelector('.mi-check');
     if (mark) mark.hidden = !on;
@@ -404,25 +404,15 @@ function setThemeMode(mode) {
   applyTheme();
 }
 /*
- * 主题单选项的样式「只由同一份 CSS 决定」——这里必须保证三个选项处在完全相同的环境中：
- * 之前菜单挂在 <body> 上并使用 position:fixed，当文档根元素是亮色主题时，
- * 页面可能产生非 0 的初始包含块偏移/会被滚动区域裁切，排在上面的某一项（如「亮色」）
- * 就会叠到浅色背景上，视觉上像是单独被染灰了。
- * 把菜单移到一个不参与页面布局的 fixed 图层容器里，三项的绘制环境完全一致。
+ * 三个主题选项一律只用 data-theme-mode 记录取值。
+ * 不能用 data-theme：样式层用 [data-theme="light"] 表示「当前整站主题为亮色」，
+ * 若某个菜单项也带 data-theme="light"，整站亮色规则会命中这一行（背景/文字被单独染色），
+ * 于是「亮色」选项看起来总比其它项发灰。
  */
-let themeMenuHost = document.getElementById('themeMenuHost');
-if (!themeMenuHost) {
-  themeMenuHost = document.createElement('div');
-  themeMenuHost.id = 'themeMenuHost';
-  document.body.appendChild(themeMenuHost);
-}
-themeMenuHost.appendChild($('#appMenu'));
-
-document.querySelectorAll('#appMenu .menu-item-radio[data-theme]').forEach(item => {
-  item.onclick = e => { e.stopPropagation(); setThemeMode(item.dataset.theme); $('#appMenu').classList.add('hidden'); };
+document.querySelectorAll('#appMenu .menu-item-radio[data-theme-mode]').forEach(item => {
+  item.onclick = e => { e.stopPropagation(); setThemeMode(item.dataset.themeMode); $('#appMenu').classList.add('hidden'); };
 });
-try {
-  window.lightPlayer.getSystemTheme().then(v => { systemDark = !!(v && v.dark); applyTheme(); }).catch(() => {});
+try {  window.lightPlayer.getSystemTheme().then(v => { systemDark = !!(v && v.dark); applyTheme(); }).catch(() => {});
   window.lightPlayer.onSystemThemeChange(dark => { systemDark = dark; if (themeMode === 'system') applyTheme(); });
 } catch (_) {}
 applyTheme();   // 立即应用（不等异步查询，避免启动时闪一下默认色）

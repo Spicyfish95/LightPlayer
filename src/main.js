@@ -44,6 +44,7 @@ function killProcessTree(proc) {
 
 function createWindow() {
   const win = new BrowserWindow({ width: 1440, height: 900, minWidth: 1080, minHeight: 680, backgroundColor: '#080b12', frame: false, icon: path.join(__dirname, '..', 'build', 'icon.ico'), webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
+  // win.webContents.openDevTools();
   win.loadFile(path.join(__dirname, 'index.html'));
 }
 app.whenReady().then(() => {
