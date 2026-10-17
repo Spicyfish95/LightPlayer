@@ -399,7 +399,7 @@ function syncThemeQuickOptions() {
     const on = item.dataset.themeMode === themeMode;
     item.classList.toggle('active', on);
     const mark = item.querySelector('.sp-check');
-    if (mark) mark.hidden = !on;   // .sp-check 用 min-width 占位，隐藏时不跳行
+    if (mark) mark.hidden = !on;
   });
 }
 function applyTheme() {

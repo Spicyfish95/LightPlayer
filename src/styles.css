@@ -74,6 +74,8 @@ button,input,select{font:inherit}
 .sp-check-row{justify-content:space-between}
 .sp-check{display:inline-flex;color:var(--cyan);flex:none}
 .sp-check .ic{width:16px;height:16px}
+/* markup 用的是 HTML 布尔属性 hidden，必须显式声明，否则 .sp-check 的 display:inline-flex 会盖掉 [hidden] 的默认样式 */
+.sp-check[hidden]{display:none}
 .sp-switch-row{justify-content:space-between;cursor:default}
 .sp-switch-row:hover{background:transparent;color:var(--item-text)}
 .sp-switch-row .switch{cursor:pointer}
