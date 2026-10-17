@@ -302,7 +302,9 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 .pl-chevron{display:inline-flex;color:var(--dim3);transform:rotate(-90deg);transition:transform .15s}
 .pl-chevron.open{transform:rotate(0)}
 .pl-chevron .ic{width:14px;height:14px}
-.pl-folder{display:inline-flex;color:var(--accent)}
+/* 目录图标是一个可点按钮：在文件资源管理器中打开该文件夹（不影响整行的展开/折叠） */
+.pl-folder{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;color:var(--accent);cursor:pointer;flex:none;transition:background .15s,color .15s}
+.pl-folder:hover{background:var(--accent-soft);color:var(--accent-text)}
 .pl-folder .ic{width:16px;height:16px}
 .pl-group-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pl-count{font-size:11px;color:var(--dim);background:var(--hover);border-radius:8px;padding:1px 7px;flex:none}

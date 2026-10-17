@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('lightPlayer', {
   getHwAccel: () => ipcRenderer.invoke('settings:hw-accel', null),
   saveSession: payload => ipcRenderer.invoke('session:save', payload),
   loadSession: () => ipcRenderer.invoke('session:load'),
+  openFolder: dir => ipcRenderer.invoke('shell:open-folder', dir),
   startAsr: options => ipcRenderer.invoke('asr:start', options),
   stopAsr: () => ipcRenderer.send('asr:stop'),
   seekAsr: payload => ipcRenderer.send('asr:seek', payload),

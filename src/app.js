@@ -566,7 +566,7 @@ function renderPlaylist() {
     return `<div class="pl-group">
       <div class="pl-group-head" title="${escapeHtml(g.dir)}">
         <span class="pl-chevron${expanded ? ' open' : ''}">${icon('chevron')}</span>
-        <span class="pl-folder">${icon('folder')}</span>
+        <span class="pl-folder" data-open-dir="${escapeHtml(g.dir)}" title="在文件资源管理器中打开该文件夹">${icon('folder')}</span>
         <span class="pl-group-name">${escapeHtml(name)}</span>
         <span class="pl-count">${g.files.length}</span>
         <button class="pl-remove" data-dir="${escapeHtml(g.dir)}" title="从播放列表移除该文件夹">${icon('close')}</button>
@@ -584,6 +584,17 @@ function renderPlaylist() {
       e.stopPropagation();
       if (btn.hasAttribute('data-dir')) removeGroup(btn.dataset.dir);
       else if (btn.dataset.file) removeFile(btn.dataset.file);
+    };
+  });
+  // 目录图标：点击在系统文件资源管理器中打开该文件夹（不触发展开/折叠，冒泡到组头会被 stopPropagation 拦住）
+  box.querySelectorAll('.pl-folder[data-open-dir]').forEach(folder => {
+    folder.onclick = async e => {
+      e.stopPropagation();
+      const dir = folder.dataset.openDir;
+      if (!dir) return;
+      let ok = false;
+      try { ok = await window.lightPlayer.openFolder(dir); } catch (_) { ok = false; }
+      if (!ok) showToast('无法打开该文件夹：' + dir);
     };
   });
   box.querySelectorAll('.playlist-item').forEach(item => { item.onclick = () => { const f = playlist[Number(item.dataset.index)]; if (f && f !== activeFile) loadFile(f); }; });

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, utilityProcess, nativeTheme } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, utilityProcess, nativeTheme, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawnSync } = require('child_process');
@@ -64,6 +64,15 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('session:load', () => {
     try { return JSON.parse(fs.readFileSync(sessionFile(), 'utf8')); } catch (_) { return null; }
+  });
+  // 在系统文件资源管理器中打开某个文件夹（播放列表的目录图标使用）
+  ipcMain.handle('shell:open-folder', async (event, dir) => {
+    try {
+      if (typeof dir !== 'string' || !dir) return false;
+      if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return false;
+      const err = await shell.openPath(dir);
+      return !err;
+    } catch (_) { return false; }
   });
   ipcMain.handle('dialog:open-video', async () => {
     const result = await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'], filters: [{ name: '视频文件', extensions: ['mp4','mkv','webm','mov','avi','m4v','mp3','wav','flac'] }] });
