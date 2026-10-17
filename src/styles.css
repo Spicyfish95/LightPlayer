@@ -401,8 +401,13 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 .menu-item-radio .mi-check{display:inline-flex;align-items:center;color:var(--accent);flex:none}
 .menu-item-radio .mi-check .ic{width:14px;height:14px}
 .menu-item-radio .mi-check[hidden]{display:inline-flex;visibility:hidden}
-.menu-item-radio.active{color:var(--accent-text)}
-.menu-item-radio.active:hover{color:var(--accent-text)}
+/* 选中项不加颜色强调：三个选项文字同色，只靠右侧勾选标记区分；
+   否则强调色（--accent-text 偏淡紫）在暗色下会显得发灰。 */
+.menu-item-radio,
+.menu-item-radio.active,
+.menu-item-radio.active:hover{color:var(--item-text)}
+.menu-item-radio:hover,
+.menu-item-radio.active:hover{color:var(--item-text-strong)}
 
 /* ---------- 主题：播放区与浮层 ---------- */
 /* 已载入视频时播放区强制深色（视频画面为暗底，浅色背景会露边显脏）；
