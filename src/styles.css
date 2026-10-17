@@ -181,6 +181,9 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 .time-jump-editor input{width:92px;padding:3px 8px;background:#0d1320;border:1px solid var(--line);border-radius:6px;color:var(--text);font-size:12px;font-variant-numeric:tabular-nums;outline:none;transition:border-color .15s}
 .time-jump-editor input:focus{border-color:var(--accent)}
 .time-jump-editor input::placeholder{color:var(--muted)}
+/* 屏幕中间纯文字提示（如时间跳转越界），无按钮、一段时间后消失 */
+.center-toast{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:95;padding:10px 22px;border:1px solid #35405a;border-radius:10px;background:rgba(10,14,22,.86);color:#fff;font-size:14px;letter-spacing:.3px;backdrop-filter:blur(8px);box-shadow:0 12px 34px rgba(0,0,0,.55);pointer-events:none;white-space:nowrap;animation:volToastIn .16s ease-out}
+.center-toast.hidden{display:none}
 .spacer{flex:1}
 
 /* ---------- 音量子菜单（普通工具栏 / 全屏工具栏共用样式：竖向滑杆 + 音量百分比） ---------- */

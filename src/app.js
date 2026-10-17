@@ -71,6 +71,7 @@ app.innerHTML = `
       <button id="resumeRestart">从头开始播放</button>
       <i class="resume-bar" id="resumeBar"></i>
     </div>
+    <div class="center-toast hidden" id="centerToast"></div>
     <!-- 滚轮调音量提示：窗口聚焦时用滚轮改音量即出现；位于 #videoWrap 内，全屏同样可见 -->
     <div class="vol-toast hidden" id="volToast">
       <span class="vt-ico" id="volToastIcon">${icon('volume')}</span>
@@ -1016,16 +1017,13 @@ video.ontimeupdate = () => {
 /* ---------- 点击时间跳转（工具栏「当前时间 / 总时长」文字）：点开内嵌输入框，回车跳转 ---------- */
 // 输入格式：「数字」= 秒（如 90 → 1:30）；「时:分[:秒]」按 冒号分隔的时长 解析（1:30 → 90 秒，1:02:03 → 1 小时 2 分 3 秒）。
 // 越界（负数或超过视频时长）不跳转，仅 toast 提示；未更改/空输入直接关闭输入框。
+let centerToastTimer = null;
 function showToast(text) {
-  $('#resumeToastText').textContent = text;
-  const toast = $('#resumeToast');
+  const toast = $('#centerToast');
+  toast.textContent = text;
   toast.classList.remove('hidden');
-  const bar = $('#resumeBar');
-  bar.style.transition = 'none'; bar.style.width = '100%';
-  void bar.offsetWidth;
-  bar.style.transition = 'width 3s linear'; bar.style.width = '0%';
-  clearTimeout(resumeToastTimer);
-  resumeToastTimer = setTimeout(() => toast.classList.add('hidden'), 3000);
+  clearTimeout(centerToastTimer);
+  centerToastTimer = setTimeout(() => toast.classList.add('hidden'), 2000);
 }
 function parseTimeInput(raw) {
   const s = String(raw).trim();
