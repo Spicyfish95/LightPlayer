@@ -180,12 +180,8 @@ button,input,select{font:inherit}
 input[type=range]{-webkit-appearance:none;appearance:none;background:transparent;cursor:pointer;padding:0;margin:0}
 #seek{width:100%;position:relative;z-index:1}
 #seek::-webkit-slider-runnable-track{height:4px;background:var(--track);border-radius:2px}
-/* 进度条滑块固定白色（与主题无关）；轨道用 --track，亮色下是浅灰，与已播放渐变对比明显 */
+/* 进度条滑块固定白色，不随主题变化 */
 #seek::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#fff;margin-top:-4px;box-shadow:0 1px 4px rgba(0,0,0,.5)}
-/* 亮色主题下进度条：未播放轨道整体加深一档，已播放部分替换为不透明的饱和渐变，两者对比清楚 */
-[data-theme="light"] #seek{--track:#c3ccda}
-[data-theme="light"] .progress .fill,
-[data-theme="light"] .fs-progress .fs-fill{background:linear-gradient(90deg,#6a4df5,#0f9fa0)}
 /* 音量滑杆与百分比移入音量子菜单，工具栏只保留按钮 */
 .control-row{display:flex;align-items:center;gap:6px;margin-top:6px}
 .ctrl{height:32px;min-width:36px;padding:0 6px;border:0;border-radius:8px;background:transparent;color:var(--item-text);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:13px}
