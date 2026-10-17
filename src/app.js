@@ -658,7 +658,7 @@ function toggleVolumePopover(sel, anchor) {
   hideAllPopovers();
   if (!wasHidden) return;
   syncVolumeUi();
-  positionFloatingPopover(pop, anchor, 'center');   // 音量弹窗在按钮正上方居中显示
+  positionFloatingPopover(pop, anchor, 'center');   // 音量弹窗在按钮正上方居中显示（内部已置 fsPopoverOpen）
 }
 $('#mute').onclick = e => { e.stopPropagation(); toggleVolumePopover('#volPopover', $('#mute')); };
 $('#fsMute').onclick = e => { e.stopPropagation(); toggleVolumePopover('#fsVolPopover', $('#fsMute')); };
@@ -747,12 +747,23 @@ function syncFsControls() {
   $('#fsFill').style.width = p * 100 + '%'; $('#fsSeek').value = p * 1000;
   $('#fsTime').textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration);
 }
-// 播放中且无操作 2.6 秒后自动隐藏工具栏并隐藏鼠标指针（移动鼠标立即恢复）
+// 播放中且无操作 2.6 秒后自动隐藏工具栏并隐藏鼠标指针（移动鼠标立即恢复）。
+// 悬停在工具栏 / 弹层上、或有弹层打开时不隐藏——否则用户正在操作按钮时工具栏会消失。
+const FS_UI_HOVER = '.fs-ui, .sub-popover, .vol-popover, .play-pop, #fsPlaylist, #speedPop, #speedPopFs, .modal-overlay';
+let fsPopoverOpen = false;   // 全屏下有弹层打开时保持工具栏可见（打开/关闭处调用 fsSetPopover）
+function fsSetPopover(open) { fsPopoverOpen = !!open; if (open) fsShowUi(); }
+function fsIsHoverUi() {
+  if (fsPopoverOpen) return true;
+  const el = document.activeElement === document.body ? null : document.querySelector(':hover');
+  let n = el;
+  while (n) { if (n.matches && n.matches(FS_UI_HOVER)) return true; n = n.parentElement; }
+  return false;
+}
 function fsShowUi() {
   videoWrap.classList.remove('fs-idle');
   clearTimeout(fsIdleTimer);
   if (document.fullscreenElement === videoWrap && !video.paused) {
-    fsIdleTimer = setTimeout(() => videoWrap.classList.add('fs-idle'), 2600);
+    fsIdleTimer = setTimeout(() => { if (!fsIsHoverUi()) videoWrap.classList.add('fs-idle'); else fsShowUi(); }, 2600);
   }
 }
 videoWrap.addEventListener('mousemove', fsShowUi);
@@ -800,14 +811,15 @@ function hideAllPopovers() {
   $('#fsVolPopover').classList.add('hidden');
   $('#fsPlaylist').classList.add('hidden');
   hideSpeedMenus();
+  fsSetPopover(false);   // 全屏下弹层全部收起后，工具栏恢复按闲置计时隐藏
 }
 $('#fsPanelBtn').onclick = e => {
   e.stopPropagation();
   hideSpeedMenus();
   $('#subPopover').classList.add('hidden');
   const p = $('#fsPlaylist');
-  if (p.classList.contains('hidden')) { renderFsPlaylist(); p.classList.remove('hidden'); fsShowUi(); }
-  else p.classList.add('hidden');
+  if (p.classList.contains('hidden')) { renderFsPlaylist(); p.classList.remove('hidden'); fsSetPopover(true); }
+  else { p.classList.add('hidden'); fsSetPopover(false); }
 };
 $('#fsPlClose').onclick = e => { e.stopPropagation(); $('#fsPlaylist').classList.add('hidden'); };
 $('#fsPlBody').onclick = e => {
@@ -839,7 +851,7 @@ function renderSpeedMenu() {
   $('#speedMenu').innerHTML = html;
   $('#fsSpeedMenu').innerHTML = html;
 }
-function hideSpeedMenus() { $('#speedMenu').classList.add('hidden'); $('#fsSpeedMenu').classList.add('hidden'); }
+function hideSpeedMenus() { $('#speedMenu').classList.add('hidden'); $('#fsSpeedMenu').classList.add('hidden'); fsSetPopover(false); }
 function onSpeedPick(e) {
   const item = e.target.closest('.speed-item'); if (!item) return;
   setSpeed(Number(item.dataset.s));
@@ -1231,7 +1243,7 @@ $('#brandBtn').onclick = e => { e.stopPropagation(); $('#appMenu').classList.tog
 document.addEventListener('click', e => {
   if (!e.target.closest('#brandBtn') && !e.target.closest('#appMenu')) $('#appMenu').classList.add('hidden');
   if (!e.target.closest('#speed') && !e.target.closest('#speedMenu')) $('#speedMenu').classList.add('hidden');
-  if (!e.target.closest('#subBtn') && !e.target.closest('#fsSubBtn') && !e.target.closest('#subPopover')) $('#subPopover').classList.add('hidden');
+  if (!e.target.closest('#subBtn') && !e.target.closest('#fsSubBtn') && !e.target.closest('#subPopover')) { $('#subPopover').classList.add('hidden'); subPopAnchor = null; fsSetPopover(false); }
 });
 document.querySelectorAll('.app-menu .menu-item[data-modal]').forEach(item => {
   item.onclick = e => { e.stopPropagation(); $('#appMenu').classList.add('hidden'); openModal(item.dataset.modal); };
@@ -1259,6 +1271,7 @@ $('#playPop').onclick = e => e.stopPropagation();   // 弹层内操作不冒泡�
 document.addEventListener('click', e => {
   if (e.target.closest('#playSettingsBtn, #playPop')) return;
   $('#playPop').classList.add('hidden');
+  fsSetPopover(false);
 }, true);
 // 弹层内容高度变化（文案换行等）后按原锚点重新定位，否则可能越出视窗
 new ResizeObserver(() => {
@@ -1344,6 +1357,7 @@ let subPopAnchor = null;   // 当前弹层的锚点按钮，内容高度变化�
 // 字幕菜单与音量子菜单共用本函数（默认宽度/高度按各自内容给定，实际尺寸优先）
 function positionFloatingPopover(pop, anchor, align = 'right') {
   pop.classList.remove('hidden');
+  fsSetPopover(true);   // 弹层打开：全屏下工具栏保持可见
   const r = anchor.getBoundingClientRect();
   const pw = pop.offsetWidth || 210;
   const ph = pop.offsetHeight || 260;
@@ -1361,7 +1375,7 @@ function toggleSubPopover(anchor) {
   $('#fsPlaylist').classList.add('hidden');
   const pop = $('#subPopover');
   if (pop.classList.contains('hidden')) { subPopAnchor = anchor; positionFloatingPopover(pop, anchor); }
-  else { pop.classList.add('hidden'); subPopAnchor = null; }
+  else { pop.classList.add('hidden'); subPopAnchor = null; fsSetPopover(false); }
 }
 $('#subBtn').onclick = e => { e.stopPropagation(); toggleSubPopover($('#subBtn')); };
 $('#fsSubBtn').onclick = e => { e.stopPropagation(); toggleSubPopover($('#fsSubBtn')); };
