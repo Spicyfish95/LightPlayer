@@ -18,5 +18,9 @@ contextBridge.exposeInMainWorld('lightPlayer', {
   pathForFile: file => { try { return webUtils.getPathForFile(file); } catch (_) { return file && file.path || ''; } },
   minimize: () => ipcRenderer.send('window:minimize'),
   maximize: () => ipcRenderer.send('window:maximize'),
-  close: () => ipcRenderer.send('window:close')
+  close: () => ipcRenderer.send('window:close'),
+  // 主题：系统亮/暗查询 + 变化订阅 + 通知主进程当前模式（同步原生控件配色）
+  getSystemTheme: () => ipcRenderer.invoke('theme:system'),
+  setThemeMode: mode => ipcRenderer.send('theme:mode', mode),
+  onSystemThemeChange: callback => ipcRenderer.on('theme:system-changed', (_, data) => callback(!!(data && data.dark)))
 });

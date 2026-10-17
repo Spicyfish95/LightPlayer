@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, utilityProcess } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, utilityProcess, nativeTheme } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawnSync } = require('child_process');
@@ -256,8 +256,17 @@ app.whenReady().then(() => {
     asrSend({ cmd: payload && payload.seek ? 'seek' : 'pos', sid: asrActiveSid || undefined,
               start: Number(payload && payload.start) || 0, rate: Number(payload && payload.rate) || 1 });
   });
-  ipcMain.on('window:minimize', e => BrowserWindow.fromWebContents(e.sender)?.minimize());
-  ipcMain.on('window:maximize', e => { const w = BrowserWindow.fromWebContents(e.sender); w.isMaximized() ? w.unmaximize() : w.maximize(); });
+  // 主题：跟随系统时由主进程读取 OS 亮/暗并广播变化（nativeTheme.shouldUseDarkColors）
+  ipcMain.handle('theme:system', () => ({ dark: nativeTheme.shouldUseDarkColors }));
+  ipcMain.on('theme:mode', (e, mode) => {
+    // 同步原生主题来源，让窗口控件（滚动条、默认右键菜单、titlebar 覆盖色）与界面一致
+    nativeTheme.themeSource = mode === 'light' || mode === 'dark' ? mode : 'system';
+  });
+  nativeTheme.on('updated', () => {
+    const payload = { dark: nativeTheme.shouldUseDarkColors };
+    for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('theme:system-changed', payload);
+  });
+  ipcMain.on('window:minimize', e => BrowserWindow.fromWebContents(e.sender)?.minimize());  ipcMain.on('window:maximize', e => { const w = BrowserWindow.fromWebContents(e.sender); w.isMaximized() ? w.unmaximize() : w.maximize(); });
   ipcMain.on('window:close', e => {
     shutdownAsrDaemon();
     BrowserWindow.fromWebContents(e.sender)?.close();

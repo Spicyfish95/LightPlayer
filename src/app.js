@@ -53,6 +53,14 @@ app.innerHTML = `
       </div>
     </div>
     <div class="menu-item" data-modal="settings">设置</div>
+    <div class="menu-group" id="themeMenuGroup">
+      <span class="mg-label">主题</span><span class="menu-arrow">${icon('chevron')}</span>
+      <div class="sub-menu">
+        <div class="menu-item menu-item-radio" data-theme="dark"><span>暗色</span><span class="mi-check" hidden>${icon('check')}</span></div>
+        <div class="menu-item menu-item-radio" data-theme="light"><span>亮色</span><span class="mi-check" hidden>${icon('check')}</span></div>
+        <div class="menu-item menu-item-radio" data-theme="system"><span>跟随系统</span><span class="mi-check" hidden>${icon('check')}</span></div>
+      </div>
+    </div>
     <div class="menu-item" data-modal="data">数据管理</div>
     <div class="menu-item" data-modal="hotkeys">快捷键</div>
     <div class="menu-item" data-modal="about">关于</div>
@@ -367,6 +375,42 @@ function savePlaylistState() {
   try { window.lightPlayer.saveSession({ kind: 'playlist', data: payload }); } catch (_) {}
 }
 const progressSaveTimer = setInterval(saveProgress, 3000);   // 每 3 秒记录一次播放位置
+
+/* ---------- 主题：暗色 / 亮色 / 跟随系统 ----------
+   落地方式：<html data-theme="dark|light"> 切换 styles.css 中的变量组；「跟随系统」由主进程
+   nativeTheme.shouldUseDarkColors 判定，系统切换时主进程广播 theme:system-changed。 */
+const THEME_MODES = ['dark', 'light', 'system'];
+const THEME_LABELS = { dark: '暗色', light: '亮色', system: '跟随系统' };
+let themeMode = THEME_MODES.includes(store.get('theme', 'dark')) ? store.get('theme', 'dark') : 'dark';   // 默认暗色
+let systemDark = true;
+function resolveTheme(mode) { return mode === 'system' ? (systemDark ? 'dark' : 'light') : mode; }
+function applyTheme() {
+  const actual = resolveTheme(themeMode);
+  document.documentElement.setAttribute('data-theme', actual);
+  document.documentElement.style.colorScheme = actual;          // 原生控件（滑杆/滚动条/输入框）跟随
+  const meta = document.querySelector('meta[name="color-scheme"]');
+  if (meta) meta.setAttribute('content', actual);
+  document.querySelectorAll('#appMenu .menu-item-radio').forEach(item => {
+    const on = item.dataset.theme === themeMode;
+    item.classList.toggle('active', on);
+    const mark = item.querySelector('.mi-check');
+    if (mark) mark.hidden = !on;
+  });
+  try { window.lightPlayer.setThemeMode(themeMode); } catch (_) {}   // 同步原生主题来源（标题栏/弹窗）
+}
+function setThemeMode(mode) {
+  themeMode = THEME_MODES.includes(mode) ? mode : 'dark';
+  store.set('theme', themeMode);
+  applyTheme();
+}
+document.querySelectorAll('#appMenu .menu-item-radio[data-theme]').forEach(item => {
+  item.onclick = e => { e.stopPropagation(); setThemeMode(item.dataset.theme); $('#appMenu').classList.add('hidden'); };
+});
+try {
+  window.lightPlayer.getSystemTheme().then(v => { systemDark = !!(v && v.dark); applyTheme(); }).catch(() => {});
+  window.lightPlayer.onSystemThemeChange(dark => { systemDark = dark; if (themeMode === 'system') applyTheme(); });
+} catch (_) {}
+applyTheme();   // 立即应用（不等异步查询，避免启动时闪一下默认色）
 
 /* ---------- 字幕显示 ---------- */
 const fmt = s => { if (!isFinite(s)) return '00:00'; s = Math.max(0, Math.floor(s)); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
