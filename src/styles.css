@@ -176,12 +176,15 @@ button,input,select{font:inherit}
 /* ---------- 控制条 ---------- */
 .controls{padding:8px 14px 14px;background:var(--bar);border-top:1px solid var(--line);position:relative}
 .progress{position:relative;height:16px;display:flex;align-items:center}
+/* 已播放段：与全屏 .fs-fill 相同的强调色→青色渐变（见 .fs-progress .fs-fill） */
 .progress .fill{position:absolute;left:0;height:4px;background:linear-gradient(90deg,var(--accent),var(--cyan));border-radius:2px;width:0;pointer-events:none}
 input[type=range]{-webkit-appearance:none;appearance:none;background:transparent;cursor:pointer;padding:0;margin:0}
 #seek{width:100%;position:relative;z-index:1}
 #seek::-webkit-slider-runnable-track{height:4px;background:var(--track);border-radius:2px}
-/* 进度条滑块固定白色，不随主题变化 */
-#seek::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#fff;margin-top:-4px;box-shadow:0 1px 4px rgba(0,0,0,.5)}
+/* 非全屏进度条与全屏保持同一套观感：已播放段由 .fill 的强调色→青色渐变绘制，
+   滑块固定白色、悬停略微放大，和 #fsSeek 的 13px 滑块对齐 */
+#seek::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:#fff;margin-top:-4.5px;box-shadow:0 1px 4px rgba(0,0,0,.5);transition:transform .12s}
+#seek:hover::-webkit-slider-thumb{transform:scale(1.12)}
 /* 音量滑杆与百分比移入音量子菜单，工具栏只保留按钮 */
 .control-row{display:flex;align-items:center;gap:6px;margin-top:6px}
 .ctrl{height:32px;min-width:36px;padding:0 6px;border:0;border-radius:8px;background:transparent;color:var(--item-text);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:13px}
