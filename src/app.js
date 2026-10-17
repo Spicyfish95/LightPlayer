@@ -392,6 +392,16 @@ const THEME_LABELS = { dark: '暗色', light: '亮色', system: '跟随系统' }
 let themeMode = THEME_MODES.includes(store.get('theme', 'dark')) ? store.get('theme', 'dark') : 'dark';   // 默认暗色
 let systemDark = true;
 function resolveTheme(mode) { return mode === 'system' ? (systemDark ? 'dark' : 'light') : mode; }
+// 标题栏快捷主题弹窗的勾选状态：与左上角菜单读写同一份 themeMode。
+// 用函数声明提升，便于上面的 applyTheme 直接调用（首次 applyTheme 早于本段执行也没问题）。
+function syncThemeQuickOptions() {
+  document.querySelectorAll('#themeQuickPop .sp-item[data-theme-mode]').forEach(item => {
+    const on = item.dataset.themeMode === themeMode;
+    item.classList.toggle('active', on);
+    const mark = item.querySelector('.sp-check');
+    if (mark) mark.hidden = !on;   // .sp-check 用 min-width 占位，隐藏时不跳行
+  });
+}
 function applyTheme() {
   const actual = resolveTheme(themeMode);
   document.documentElement.setAttribute('data-theme', actual);
@@ -404,13 +414,7 @@ function applyTheme() {
     const mark = item.querySelector('.mi-check');
     if (mark) mark.hidden = !on;
   });
-  // 标题栏快捷主题弹窗与左上角菜单的「主题」共用同一份状态，这里一并刷新勾选
-  document.querySelectorAll('#themeQuickPop .sp-item[data-theme-mode]').forEach(item => {
-    const on = item.dataset.themeMode === themeMode;
-    item.classList.toggle('active', on);
-    const mark = item.querySelector('.sp-check');
-    if (mark) mark.hidden = !on;
-  });
+  syncThemeQuickOptions();
   try { window.lightPlayer.setThemeMode(themeMode); } catch (_) {}   // 同步原生主题来源（标题栏/弹窗）
 }
 function setThemeMode(mode) {
@@ -433,6 +437,7 @@ function setThemeQuickOpen(open) {
   const pop = $('#themeQuickPop');
   pop.hidden = !open;
   $('#themeQuickBtn').classList.toggle('on', open);
+  if (open) syncThemeQuickOptions();   // 打开瞬间按当前 themeMode 刷新一次勾选，避免沿用旧状态
 }
 $('#themeQuickBtn').onclick = e => { e.stopPropagation(); setThemeQuickOpen($('#themeQuickPop').hidden); };
 $('#themeQuickPop').onclick = e => {
@@ -445,7 +450,8 @@ $('#themeQuickPop').onclick = e => {
 document.addEventListener('click', e => {
   if (!e.target.closest('#themeQuickBtn') && !e.target.closest('#themeQuickPop')) setThemeQuickOpen(false);
 });
-try {  window.lightPlayer.getSystemTheme().then(v => { systemDark = !!(v && v.dark); applyTheme(); }).catch(() => {});
+try {
+  window.lightPlayer.getSystemTheme().then(v => { systemDark = !!(v && v.dark); applyTheme(); }).catch(() => {});
   window.lightPlayer.onSystemThemeChange(dark => { systemDark = dark; if (themeMode === 'system') applyTheme(); });
 } catch (_) {}
 applyTheme();   // 立即应用（不等异步查询，避免启动时闪一下默认色）
