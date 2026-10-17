@@ -97,6 +97,9 @@ button,input,select{font:inherit}
 /* 播放后操作下拉：内嵌在弹层行内，不能沿用 .select 的 width:100%（会撑满整行、把右侧列挤掉） */
 .play-pop .sp-select{width:auto;flex:none;padding:5px 8px;font-size:12.5px;border-radius:7px;cursor:pointer}
 .play-pop .sp-switch-row{cursor:default}
+/* 实时字幕弹层里「识别语言」行：左侧文字不换行、右侧下拉只占内容宽度 */
+.sub-popover .sp-select{width:auto;flex:none;max-width:52%;padding:4px 7px;font-size:12.5px;border-radius:7px;cursor:pointer}
+.sub-popover .sp-switch-row > :first-child{flex:none;white-space:nowrap}
 
 /* ---------- 数据管理：紧凑按钮布局 / 确认弹窗 ---------- */
 .btn-row{display:flex;gap:8px;margin-top:10px}
@@ -350,13 +353,21 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 .style-row{display:flex;align-items:center;gap:8px;padding:7px 0;font-size:12.5px;color:var(--group-text);border-bottom:1px solid var(--divider)}
 .style-row label{width:56px;flex:none}
 .style-row label.mid{width:auto;margin-left:14px}
-.style-row input[type=range]{flex:1}
+/* 字幕样式里的滑杆（字号/行距等）自带一条可见轨道：
+   全局 input[type=range] 只有 transparent 背景，不画轨道，亮色主题下几乎看不见。 */
+.style-row input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:16px;background:transparent;cursor:pointer;padding:0;margin:0}
+.style-row input[type=range]::-webkit-slider-runnable-track{height:4px;background:var(--track);border-radius:2px}
+.style-row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:var(--accent);margin-top:-4.5px;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.style-row input[type=range]:hover::-webkit-slider-thumb{filter:brightness(1.12)}
 .style-row input.num{flex:1;min-width:0;padding:6px 10px;background:var(--soft);border:1px solid var(--line);border-radius:8px;color:var(--text)}
 .style-row .unit{color:var(--dim2);font-size:11px;flex:none}
 .style-row input[type=color]{width:34px;height:26px;border:1px solid var(--line);border-radius:6px;background:var(--soft);padding:2px;cursor:pointer}
 .style-row .select{flex:1}
 .style-row .val{width:44px;text-align:right;color:var(--muted);font-size:11px;flex:none}
-.settings-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--divider);font-size:13px}
+.settings-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--divider);font-size:13px}
+/* 设置行左侧标签不换行、不被压缩，右侧控件（下拉/开关）只占内容宽度 */
+.settings-row > :first-child{flex:none;white-space:nowrap}
+.settings-row .select{flex:0 0 auto;width:auto;max-width:60%;padding:6px 8px;font-size:12.5px;border-radius:7px;cursor:pointer}
 .keyboard{background:var(--hover);border-radius:6px;padding:2px 8px;font-size:11px;color:var(--muted)}
 
 /* ---------- 滚动条 ---------- */
