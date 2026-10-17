@@ -72,7 +72,7 @@ app.innerHTML = `
 <main class="main">
   <div class="video-wrap" id="videoWrap">
     <video id="video" preload="metadata"></video>
-    <div class="empty-state" id="empty"><div class="empty-icon">${icon('video')}</div><h2>打开一个视频开始播放</h2><p>支持 MP4、MKV、WebM、MOV 等格式</p><div class="drop-hint">拖放文件到此处，或按 Ctrl + O</div></div>
+    <div class="empty-state" id="empty"><div class="empty-icon">${icon('video')}</div><h2>打开一个视频开始播放</h2><p>支持 MP4、MKV、WebM、MOV 等格式</p><div class="drop-hint">拖放文件到此处，或按 Ctrl + O</div><button class="btn" id="emptyOpenBtn">打开视频…</button></div>
     <div class="top-chip hidden" id="qualityChip">原画</div>
     <div class="resume-toast hidden" id="resumeToast">
       <span id="resumeToastText">已定位到上次观看位置</span>
@@ -552,6 +552,7 @@ function stopPlayback() {
   video.pause(); video.removeAttribute('src'); video.load();
   activeFile = ''; subtitles = [];
   empty.classList.remove('hidden'); $('#qualityChip').classList.add('hidden');
+  videoWrap.classList.remove('has-video');   // 回到空状态：播放区随主题变浅（亮色主题下与整站一致）。videoWrap 定义见文件后段
   $('#fileName').textContent = '暂无媒体文件'; $('#fileMeta').textContent = '打开视频后显示信息';
   $('#windowTitle').textContent = '本地视频播放器'; $('#fsTitle').textContent = '本地视频播放器';
   hideVolumeToast();
@@ -618,6 +619,7 @@ function loadFile(file, opts = {}) {
   video.src = fileUrl(file);
   video.load(); setPlayIcon();   // load() 不触发 pause 事件，需手动同步图标
   empty.classList.add('hidden'); $('#qualityChip').classList.remove('hidden');
+  videoWrap.classList.add('has-video');   // 有视频时播放区强制深色（见 styles.css .video-wrap.has-video）。videoWrap 定义见文件后段
   $('#fileName').textContent = file.split(/[\\/]/).pop();
   $('#fileMeta').textContent = '本地媒体 · 等待载入';
   $('#windowTitle').textContent = $('#fileName').textContent; $('#fsTitle').textContent = $('#fileName').textContent;
@@ -1350,6 +1352,7 @@ document.querySelectorAll('.app-menu .menu-item[data-modal]').forEach(item => {
   item.onclick = e => { e.stopPropagation(); $('#appMenu').classList.add('hidden'); openModal(item.dataset.modal); };
 });
 $('#menuOpen').onclick = e => { e.stopPropagation(); $('#appMenu').classList.add('hidden'); openFiles(); };
+$('#emptyOpenBtn').onclick = e => { e.stopPropagation(); openFiles(); };
 /* ---------- 播放设置弹层（工具栏齿轮按钮） ----------
    与同工具组的字幕/音量/倍速一致：点击按钮在按钮上方弹出浮层，点击别处或再点按钮收起。
    左上角菜单的「设置」项仍打开完整设置弹窗（openModal('settings')），不受此处影响；

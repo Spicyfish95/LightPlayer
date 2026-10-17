@@ -4,12 +4,16 @@
   --bar:#0b0f18;--bar2:#141b2a;--hover:#1a2334;--hover2:#1c2740;--border-hover:#33405c;--soft:#0d1320;--track:#232e42;--divider:#17202f;
   --btn-text:#dbe4f2;--item-text:#c6d0e2;--item-text-strong:#fff;--list-text:#9fadc4;--group-text:#aab6ca;--dim:#66758d;--dim2:#596a86;--dim3:#5f6f8c;--dim4:#7f8ea6;
   --scroll:#263148;--scroll-hover:#31405c;--accent-soft:rgba(124,92,255,.16);--accent-soft2:rgba(124,92,255,.2);--accent-text:#cfc4ff;--switch-off:#2a3550;
-  --danger:#b9364d;--danger-soft:rgba(185,54,77,.15);--danger-text:#ff9db0;--thumb-text:#cfc4ff;--badge:#1a2334;--badge-line:#2a3550}
+  --danger:#b9364d;--danger-soft:rgba(185,54,77,.15);--danger-text:#ff9db0;--thumb-text:#cfc4ff;--badge:#1a2334;--badge-line:#2a3550;
+  /* 播放区（空状态/视频底）专用：始终深色，全屏工具栏与浮层统一按暗底设计 */
+  --stage:#10141c;--stage-text:#e8edf4;--stage-dim:#7b8aa4}
 [data-theme="light"]{--bg:#f2f4f8;--panel:#ffffff;--panel2:#f6f8fb;--line:#dde3ec;--muted:#68748a;--text:#1a2230;--accent:#6a4df5;--cyan:#0f9fa0;--green:#12996e;--yellow:#c58a00;
   --bar:#ffffff;--bar2:#ffffff;--hover:#eef1f6;--hover2:#eef1f6;--border-hover:#c3ccda;--soft:#f7f9fc;--track:#dde3ec;--divider:#e8ecf2;
   --btn-text:#2b3648;--item-text:#3c4759;--item-text-strong:#0f1622;--list-text:#5a6779;--group-text:#54606f;--dim:#8a95a6;--dim2:#97a2b2;--dim3:#8a95a6;--dim4:#8a95a6;
   --scroll:#cdd5e1;--scroll-hover:#b4bfcf;--accent-soft:rgba(106,77,245,.12);--accent-soft2:rgba(106,77,245,.18);--accent-text:#5b43d6;--switch-off:#c8d0dc;
-  --danger:#d13a52;--danger-soft:rgba(209,58,82,.1);--danger-text:#c02b44;--thumb-text:#5b43d6;--badge:#eef1f6;--badge-line:#dde3ec}
+  --danger:#d13a52;--danger-soft:rgba(209,58,82,.1);--danger-text:#c02b44;--thumb-text:#5b43d6;--badge:#eef1f6;--badge-line:#dde3ec;
+  /* 亮色主题下未播放视频时不显示任何画面，播放区随主题变浅；一旦载入视频由 .has-video 强制回深色 */
+  --stage:#eef1f6;--stage-text:#2b3648;--stage-dim:#8a95a6}
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:14px/1.4 "Segoe UI",Inter,system-ui,sans-serif;transition:background .18s,color .18s}
 button,input,select{font:inherit}
@@ -127,13 +131,17 @@ button,input,select{font:inherit}
 .layout.no-side{grid-template-columns:minmax(0,1fr) 0}
 .layout.no-side .side{display:none}
 .main{display:flex;flex-direction:column;min-width:0;min-height:0}
-.video-wrap{position:relative;display:flex;align-items:center;justify-content:center;flex:1;min-height:300px;overflow:hidden;background:#10141c}
-.video-wrap video{width:100%;height:100%;object-fit:contain;background:#10141c}
-.empty-state{position:absolute;inset:0;display:grid;place-content:center;text-align:center;pointer-events:none}
-.empty-state .ic{width:54px;height:54px;color:#384763;margin:0 auto 10px}
-.empty-state h2{margin:0 0 6px;font-size:18px}
-.empty-state p{margin:0;color:var(--muted)}
-.drop-hint{margin-top:18px;color:var(--dim2);font-size:12px}
+/* 播放区：未载入视频时按主题取色（亮色主题下与整站浅色一致）；一旦载入视频由 .has-video 强制深色，
+   因为视频画面是暗底，且全屏工具栏/浮层统一按暗底设计，切主题时不翻转。 */
+.video-wrap{position:relative;display:flex;align-items:center;justify-content:center;flex:1;min-height:300px;overflow:hidden;background:var(--stage)}
+.video-wrap video{width:100%;height:100%;object-fit:contain;background:var(--stage)}
+/* 空状态按主题取色：--stage 在亮色主题下是浅底，--stage-text 是对应可读文字色 */
+.empty-state{position:absolute;inset:0;display:grid;place-content:center;text-align:center;pointer-events:none;color:var(--stage-text)}
+.empty-state .ic{width:54px;height:54px;color:var(--stage-dim);margin:0 auto 10px}
+.empty-state h2{margin:0 0 6px;font-size:18px;color:var(--stage-text)}
+.empty-state p{margin:0;color:var(--stage-dim)}
+.empty-state .btn{margin-top:18px;pointer-events:auto}
+.drop-hint{margin-top:18px;color:var(--stage-dim);font-size:12px}
 .top-chip{position:absolute;top:16px;left:16px;padding:5px 9px;border:1px solid #35405a;border-radius:6px;background:rgba(10,14,22,.7);font-size:11px;color:var(--list-text);backdrop-filter:blur(4px)}
 /* 续播提示：左下角，5 秒倒计时条直观显示剩余时间 */
 .resume-toast{position:absolute;left:16px;bottom:56px;display:flex;align-items:center;gap:10px;padding:8px 12px 10px;border:1px solid #35405a;border-radius:10px;background:rgba(10,14,22,.85);font-size:12px;color:var(--item-text);backdrop-filter:blur(6px);overflow:hidden}
@@ -172,7 +180,12 @@ button,input,select{font:inherit}
 input[type=range]{-webkit-appearance:none;appearance:none;background:transparent;cursor:pointer;padding:0;margin:0}
 #seek{width:100%;position:relative;z-index:1}
 #seek::-webkit-slider-runnable-track{height:4px;background:var(--track);border-radius:2px}
+/* 进度条滑块固定白色（与主题无关）；轨道用 --track，亮色下是浅灰，与已播放渐变对比明显 */
 #seek::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#fff;margin-top:-4px;box-shadow:0 1px 4px rgba(0,0,0,.5)}
+/* 亮色主题下进度条：未播放轨道整体加深一档，已播放部分替换为不透明的饱和渐变，两者对比清楚 */
+[data-theme="light"] #seek{--track:#c3ccda}
+[data-theme="light"] .progress .fill,
+[data-theme="light"] .fs-progress .fs-fill{background:linear-gradient(90deg,#6a4df5,#0f9fa0)}
 /* 音量滑杆与百分比移入音量子菜单，工具栏只保留按钮 */
 .control-row{display:flex;align-items:center;gap:6px;margin-top:6px}
 .ctrl{height:32px;min-width:36px;padding:0 6px;border:0;border-radius:8px;background:transparent;color:var(--item-text);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:13px}
@@ -180,7 +193,9 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 .ctrl.on{color:var(--cyan)}
 .toggle-cc.on{color:var(--cyan);background:rgba(37,208,210,.12)}
 .toggle-cc.on:hover{background:rgba(37,208,210,.2)}
-.ctrl.primary{width:44px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--cyan));color:var(--item-text-strong)}
+/* 主播放按钮：紫色渐变底 + 固定白色图标（不随主题翻转，亮色下也不会变黑） */
+.ctrl.primary{width:44px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--cyan));color:#fff}
+.ctrl.primary:hover{color:#fff;background:linear-gradient(135deg,var(--accent),var(--cyan));filter:brightness(1.08)}
 .ctrl.primary .ic{width:22px;height:22px}
 .time{color:var(--muted);font-size:12px;margin:0 8px;white-space:nowrap}
 /* 点击时间跳转：时间文字可点，编辑框内嵌在工具栏原位置，风格与工具栏一致 */
@@ -205,10 +220,8 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 .vol-popover .vol-body{height:116px;display:flex;align-items:center;justify-content:center}
 .vol-popover input.vol-range{width:108px;height:14px;transform:rotate(-90deg);display:block;background:transparent}
 .vol-popover input.vol-range::-webkit-slider-runnable-track{height:4px;background:var(--track);border-radius:2px}
-.vol-popover input.vol-range::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#fff;margin-top:-4px;box-shadow:0 1px 4px rgba(0,0,0,.5)}
-/* 全屏工具栏是深色浮层，滑杆用更亮的轨道，保证在画面上可见 */
-.video-wrap:fullscreen .vol-popover{background:rgba(14,19,30,.96)}
-.video-wrap:fullscreen .vol-popover input.vol-range::-webkit-slider-runnable-track{background:rgba(255,255,255,.28)}
+.vol-popover input.vol-range::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--accent);margin-top:-4px;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+/* 全屏下的音量弹层与普通工具栏一致，颜色全部走主题令牌（亮色主题下同样是浅色面板 + 紫色滑块） */
 
 /* ---------- 倍速子菜单 ---------- */
 /* 倍速子菜单：与音量/字幕弹窗一致改为 fixed，由 positionFloatingPopover 贴着按钮定位 */
@@ -358,6 +371,15 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 /* 全屏音量按钮保留在工具栏右侧，音量滑杆改由 #fsVolPopover 子菜单承载 */
 /* 全屏倍速菜单：定位交由 positionFloatingPopover，仅需恢复 .fs-ui 上被禁用的鼠标事件 */
 .fs-ui .fs-speed-menu{pointer-events:auto}
+/* 全屏目录面板与音量弹层同样浮在画面上：跟随主题令牌（亮色下是浅色面板，与全
+   屏幕布/工具栏的配色统一），仅保留深色投影，避免浅面板发飘。 */
+.video-wrap:fullscreen .vol-popover,
+.video-wrap:fullscreen .fs-playlist{box-shadow:0 14px 40px rgba(0,0,0,.42)}
+/* 深色主题下的全屏浮层本来就用默认令牌，这里只给亮色主题补一档投影强度 */
+[data-theme="light"] .video-wrap:fullscreen .vol-popover,
+[data-theme="light"] .video-wrap:fullscreen .fs-playlist,
+[data-theme="light"] .video-wrap:fullscreen .fs-speed-menu,
+[data-theme="light"] .video-wrap:fullscreen .sub-popover{box-shadow:0 16px 40px rgba(23,33,50,.2)}
 
 /* 全屏播放列表面板 */
 .fs-playlist{position:absolute;right:18px;bottom:76px;width:300px;max-width:calc(100% - 36px);max-height:62vh;display:flex;flex-direction:column;background:rgba(14,19,30,.96);border:1px solid var(--line);border-radius:12px;box-shadow:0 16px 44px rgba(0,0,0,.6);z-index:60;pointer-events:auto;overflow:hidden}
@@ -382,30 +404,19 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 .menu-item-radio.active{color:var(--accent-text)}
 .menu-item-radio.active:hover{color:var(--accent-text)}
 
-/* ---------- 主题：亮色下的个别修正 ---------- */
-/* 播放画面区域始终保持深色（视频画面为暗底，浅色边框/背景会显得脏） */
-[data-theme="light"] .video-wrap{background:#10141c}
-[data-theme="light"] .empty-state .ic{color:#9aa6ba}
-[data-theme="light"] .drop-hint{color:#98a3b4}
+/* ---------- 主题：播放区与浮层 ---------- */
+/* 已载入视频时播放区强制深色（视频画面为暗底，浅色背景会露边显脏）；
+   未载入视频时由 --stage 令牌决定，亮色主题下与整站浅色一致（见 :root 令牌组）。 */
+.video-wrap.has-video{--stage:#10141c;--stage-text:#e8edf4;--stage-dim:#7b8aa4}
 /* 浮在画面上的提示/浮层保持深色半透明，保证在任何画面上都可读 */
 [data-theme="light"] .vol-toast,
 [data-theme="light"] .center-toast{background:rgba(18,23,33,.9);border-color:rgba(255,255,255,.14)}
 [data-theme="light"] .top-chip{background:rgba(18,23,33,.72);border-color:rgba(255,255,255,.16);color:#d7deea}
 [data-theme="light"] .resume-toast{background:rgba(18,23,33,.9);border-color:rgba(255,255,255,.14);color:#e3e9f2}
-/* 全屏工具栏浮在画面上，同样保持深色风格 */
-[data-theme="light"] .fs-playlist{background:rgba(18,23,33,.97);border-color:rgba(255,255,255,.12)}
-[data-theme="light"] .fs-playlist .fs-pl-head{color:#c3cdda;border-color:rgba(255,255,255,.1)}
-[data-theme="light"] .fs-playlist .fs-pl-group-name{color:#9aa6b8}
-[data-theme="light"] .fs-playlist .fs-pl-item{color:#c9d3e0}
-[data-theme="light"] .fs-playlist .fs-pl-item:hover{background:rgba(255,255,255,.1);color:#fff}
-[data-theme="light"] .fs-playlist .fs-pl-item.active{background:rgba(124,92,255,.28);color:#e2dbff}
-[data-theme="light"] .fs-playlist .fs-pl-n{background:rgba(255,255,255,.1);color:#b3bfd0}
-[data-theme="light"] .fs-playlist .fs-pl-close{color:#c3cdda}
-[data-theme="light"] .fs-playlist .fs-pl-close:hover{background:rgba(255,255,255,.12);color:#fff}
-[data-theme="light"] .fs-playlist .fs-pl-empty{color:#93a0b3}
-[data-theme="light"] .video-wrap:fullscreen .vol-popover{background:rgba(14,19,30,.96)}
+/* 全屏目录面板与音量弹层的深色浮层样式见「全屏工具栏」段尾（不加主题限定，两种主题同一外观） */
 /* 模态遮罩与投影在亮色下略夸阴影强度，层次更清楚 */
 [data-theme="light"] .modal-overlay{background:rgba(30,40,58,.35)}
 [data-theme="light"] .app-menu,[data-theme="light"] .sub-menu,[data-theme="light"] .sub-popover,
-[data-theme="light"] .vol-popover,[data-theme="light"] .speed-menu,[data-theme="light"] .play-pop{box-shadow:0 16px 40px rgba(23,33,50,.16)}
+[data-theme="light"] .vol-popover,[data-theme="light"] .speed-menu,[data-theme="light"] .play-pop,
+[data-theme="light"] .fs-playlist{box-shadow:0 16px 40px rgba(23,33,50,.16)}
 [data-theme="light"] .modal{box-shadow:0 20px 60px rgba(23,33,50,.22)}
