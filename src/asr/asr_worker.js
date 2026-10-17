@@ -92,8 +92,17 @@ function probeDuration(ffprobe, file) {
 let recognizer = null;
 let vad = null;
 let ffmpegReady = null;
+// 当前识别语言（SenseVoice 支持的取值：'' = 自动 / zh / en / yue / ja / ko）。
+// recognizer 的 language 在构造时固定，切换语言需要重建 recognizer（模型文件不变，重建很快）。
+let asrLanguage = '';
+// SenseVoice 支持的语言集合（auto 由空字符串表示）
+const ASR_LANGUAGES = new Set(['', 'zh', 'en', 'yue', 'ja', 'ko']);
+function normalizeAsrLanguage(lang) {
+  const v = String(lang || '').trim().toLowerCase();
+  return ASR_LANGUAGES.has(v) ? v : '';
+}
 
-async function ensureEngine(control, modelDir) {
+async function ensureEngine(control, modelDir, language) {
   const send = (percent, message) => control.alive && emit({ kind: 'status', sid: control.sid, stage: 'model', percent, message });
 
   if (!ffmpegReady) {
@@ -111,9 +120,10 @@ async function ensureEngine(control, modelDir) {
   if (control.shouldStop()) throw new Error('stopped');
 
   send(15, '正在加载识别模型');
+  asrLanguage = normalizeAsrLanguage(language);
   recognizer = new sherpa.OfflineRecognizer({
     modelConfig: {
-      senseVoice: { model: paths.model, language: '', useInverseTextNormalization: 1 },
+      senseVoice: { model: paths.model, language: asrLanguage, useInverseTextNormalization: 1 },
       tokens: paths.tokens,
       numThreads: Math.max(1, Math.min(8, os.cpus().length || 1)),
       provider: 'cpu',
@@ -140,7 +150,7 @@ async function ensureEngine(control, modelDir) {
   const warmSamples = new Float32Array(16000 * 0.5);
   warm.acceptWaveform({ samples: warmSamples, sampleRate: 16000 });
   recognizer.decode(warm);
-  send(17, '识别模型已加载（CPU 本地识别）');
+  send(17, `识别模型已加载（CPU 本地识别 · ${asrLanguage ? asrLanguage.toUpperCase() : '自动语言'}）`);
   return ff;
 }
 
@@ -456,7 +466,7 @@ process.parentPort.on('message', async e => {
     try {
       const modelDir = String(msg.modelDir || '');
       if (!modelDir) throw new Error('缺少模型目录参数');
-      const ff = await ensureEngine(control, modelDir).catch(exc => {
+      const ff = await ensureEngine(control, modelDir, msg.language).catch(exc => {
         // FFmpeg 准备失败不缓存 rejected Promise，下次开启可重试
         ffmpegReady = null;
         throw exc;

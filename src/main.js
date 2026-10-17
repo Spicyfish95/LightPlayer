@@ -243,7 +243,9 @@ app.whenReady().then(() => {
       chunk: Number(options.chunk) || 4,
       // 透传「是否使用缓存」：渲染端关闭时必须原样送达 worker（缺省视为开启），
       // 否则 worker 端 msg.cache === undefined 会按默认开启处理，关闭开关仍会写缓存文件。
-      cache: options.cache !== false
+      cache: options.cache !== false,
+      // 识别语言：'' = 自动，zh/en/yue/ja/ko（worker 端校验，非法值回退自动）
+      language: String(options.language || '')
     });
     return { ok, sid };
   });

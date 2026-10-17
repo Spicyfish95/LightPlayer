@@ -112,6 +112,7 @@ app.innerHTML = `
       <div class="cap-enabled">
         <div class="sp-sep"></div>
         <div class="sp-item sp-check-row" id="popToggleAsr"><span class="sp-main"><span class="sp-ico">${icon('cc')}</span>实时字幕</span><span class="sp-check hidden" id="popAsrCheck">${icon('check')}</span></div>
+        <div class="sp-item sp-switch-row"><span>识别语言</span><select class="select sp-select" id="popAsrLangSelect" title="实时字幕识别语言"></select></div>
         <div class="sp-sep"></div>
         <div class="sp-group-label">外挂字幕</div>
         <div class="sp-actions">
@@ -178,6 +179,7 @@ app.innerHTML = `
     <div class="modal-body">
       <div class="section">
         <!-- 顶部总开关：是否使用缓存（默认关闭，仅开启时实时字幕才读写视频同目录缓存） -->
+        <div class="settings-row">识别语言 <select class="select" id="asrLangSelect" title="实时字幕识别语言"></select></div>
         <div class="settings-row">是否使用缓存 <div class="switch" id="asrCacheSwitch"></div></div>
         <div class="subtitle-box">
           <div class="subtitle-status"><span class="dot" id="asrDot"></span><span id="asrStatus">实时字幕已关闭</span><span class="device-badge" id="deviceBadge">引擎：未运行</span><div class="switch" id="asrSwitch"></div></div>
@@ -342,7 +344,8 @@ const settings = {
   resumePlay: store.get('resume-play', true),    // 记住播放进度（续播定位）
   keepPlaylist: store.get('keep-playlist', true), // 记住播放列表
   autoPlay: store.get('auto-play', false),       // 自动开播（默认关闭）：开启才在视频载入后自动播放
-  asrCache: store.get('asr-cache', false)        // 是否使用缓存（默认关闭）：关闭时实时字幕不读写缓存
+  asrCache: store.get('asr-cache', false),        // 是否使用缓存（默认关闭）：关闭时实时字幕不读写缓存
+  asrLanguage: store.get('asr-language', 'auto'), // 识别语言（auto/zh/en/yue/ja/ko，默认自动）
 };
 function saveProgress() {
   if (!settings.resumePlay || !activeFile || !isFinite(video.duration) || video.duration <= 0) return;
@@ -922,10 +925,12 @@ function reloadPlaySettings() {
   settings.keepPlaylist = store.get('keep-playlist', true);
   settings.autoPlay = store.get('auto-play', false);
   hwAccelOn = store.get('hw-accel', true);
+  // 识别语言也属于可清空的持久化设置：按默认值读回并同步两处下拉
+  settings.asrLanguage = store.get('asr-language', 'auto');
+  fillAsrLangSelects();
   syncVideoLoop();
   syncPlaySettingsUi();
-}
-syncVideoLoop();
+}syncVideoLoop();
 syncPlaySettingsUi();   // 初始化：两处控件按持久化状态渲染
 // 视频播放结束：播放后操作为“自动连播”时播下一个视频（当前文件夹下一个，或下一个文件夹的第一个）
 video.onended = () => {
@@ -1096,7 +1101,7 @@ async function startAsrRun() {
   setDeviceBadge(null);
   $('#caption').textContent = '正在准备本地识别引擎…'; $('#caption').classList.remove('hidden');
   $('#asrStatus').textContent = '正在准备本地识别引擎（首次开启需下载模型）…';
-  const r = await window.lightPlayer.startAsr({ video: activeFile, duration: video.duration, start: video.currentTime, cache: settings.asrCache });
+  const r = await window.lightPlayer.startAsr({ video: activeFile, duration: video.duration, start: video.currentTime, cache: settings.asrCache, language: settings.asrLanguage });
   asrSid = r && r.sid ? r.sid : 0;   // 记录本次会话，过滤旧会话残留事件
 }
 async function toggleAsr() {
@@ -1131,6 +1136,36 @@ $('#asrCacheSwitch').onclick = e => {
   settings.asrCache = $('#asrCacheSwitch').classList.toggle('on');
   store.set('asr-cache', settings.asrCache);
 };
+/* 识别语言下拉：实时字幕弹窗与字幕按钮子菜单共用同一份状态（持久化，默认自动）。
+   SenseVoice 模型支持：自动 / 中文 / 英语 / 粤语 / 日语 / 韩语。
+   运行中修改不即时生效——下次开启实时字幕（startAsrRun）时传给 worker 切换。 */
+const ASR_LANG_OPTIONS = [
+  { value: 'auto', label: '自动检测' },
+  { value: 'zh',   label: '中文' },
+  { value: 'en',   label: '英语' },
+  { value: 'yue',  label: '粤语' },
+  { value: 'ja',   label: '日语' },
+  { value: 'ko',   label: '韩语' },
+];
+function fillAsrLangSelects() {
+  for (const id of ['#asrLangSelect', '#popAsrLangSelect']) {
+    const sel = $(id);
+    sel.innerHTML = ASR_LANG_OPTIONS.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
+    sel.value = settings.asrLanguage;
+  }
+}
+function onAsrLangChange(e) {
+  settings.asrLanguage = ASR_LANG_OPTIONS.some(o => o.value === e.target.value) ? e.target.value : 'auto';
+  store.set('asr-language', settings.asrLanguage);
+  // 两处下拉同步同一状态
+  $('#asrLangSelect').value = settings.asrLanguage;
+  $('#popAsrLangSelect').value = settings.asrLanguage;
+}
+fillAsrLangSelects();
+$('#asrLangSelect').onchange = onAsrLangChange;
+$('#popAsrLangSelect').onchange = onAsrLangChange;
+$('#asrLangSelect').onclick = e => e.stopPropagation();
+$('#popAsrLangSelect').onclick = e => e.stopPropagation();
 // 播放器栏 CC 按钮的弹菜单绑定见「工具栏字幕弹出菜单」；全屏 CC 按钮仍为实时字幕快捷开关
 window.lightPlayer.onAsrEvent(data => {
   // 常驻 daemon 事件带会话 id：丢弃已切换/已停止会话的残留事件
