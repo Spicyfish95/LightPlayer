@@ -403,6 +403,21 @@ function setThemeMode(mode) {
   store.set('theme', themeMode);
   applyTheme();
 }
+/*
+ * 主题单选项的样式「只由同一份 CSS 决定」——这里必须保证三个选项处在完全相同的环境中：
+ * 之前菜单挂在 <body> 上并使用 position:fixed，当文档根元素是亮色主题时，
+ * 页面可能产生非 0 的初始包含块偏移/会被滚动区域裁切，排在上面的某一项（如「亮色」）
+ * 就会叠到浅色背景上，视觉上像是单独被染灰了。
+ * 把菜单移到一个不参与页面布局的 fixed 图层容器里，三项的绘制环境完全一致。
+ */
+let themeMenuHost = document.getElementById('themeMenuHost');
+if (!themeMenuHost) {
+  themeMenuHost = document.createElement('div');
+  themeMenuHost.id = 'themeMenuHost';
+  document.body.appendChild(themeMenuHost);
+}
+themeMenuHost.appendChild($('#appMenu'));
+
 document.querySelectorAll('#appMenu .menu-item-radio[data-theme]').forEach(item => {
   item.onclick = e => { e.stopPropagation(); setThemeMode(item.dataset.theme); $('#appMenu').classList.add('hidden'); };
 });
