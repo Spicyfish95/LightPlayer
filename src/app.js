@@ -286,7 +286,7 @@ app.innerHTML = `
       <div class="section" style="text-align:center;padding:18px 0">
         <img class="about-logo" src="../build/icon.png" alt="" style="width:56px;height:56px;border-radius:14px;display:block;margin:0 auto 12px">
         <h2 style="margin:0 0 6px;font-size:20px">LightPlayer</h2>
-        <p class="hint-text" style="margin:0">轻量、隐私优先的本地播放器<br>版本 1.0.0</p>
+        <p class="hint-text" style="margin:0">轻量、隐私优先的本地播放器<br>版本 1.1.0</p>
       </div>
       <div class="section"><h3>特性</h3><p class="hint-text">本地视频/音频播放 · 播放列表管理 · 续播记忆<br>SenseVoice 实时字幕（中/英/粤/日/韩，本机识别，不上传视频）<br>字幕样式自定义 · SRT 导出 · 免安装，无需 Python 与独立显卡</p></div>
     </div>
