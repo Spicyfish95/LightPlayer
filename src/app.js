@@ -25,6 +25,12 @@ const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   trash: '<path d="M4 7h16"/><path d="M9.5 7V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v2"/><path d="M6.5 7l1 12a2 2 0 0 0 2 1.8h5a2 2 0 0 0 2-1.8l1-12"/><path d="M10 11v6M14 11v6"/>',
   gear: '<circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  // 菜单与界面其它处用到的补充图标
+  file: '<path d="M13.5 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/><path d="M13.5 3.5V9H19"/>',
+  folderOpen: '<path d="M3.5 8a2 2 0 0 1 2-2h3.4l2 2.2h6.6a2 2 0 0 1 2 2V11"/><path d="M3.5 11h17l-2.2 6.9a2 2 0 0 1-1.9 1.4H5.6a2 2 0 0 1-2-2z"/>',
+  database: '<ellipse cx="12" cy="6" rx="7.5" ry="3"/><path d="M4.5 6v5.5c0 1.66 3.36 3 7.5 3s7.5-1.34 7.5-3V6"/><path d="M4.5 11.5V18c0 1.66 3.36 3 7.5 3s7.5-1.34 7.5-3v-6.5"/>',
+  keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M6.5 13.5h.01M17 13.5h.01M9 13.5h6"/>',
+  info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5"/><path d="M12 7.8h.01"/>',
 };
 const icon = name => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
 const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -35,9 +41,9 @@ app.innerHTML = `
 <header class="titlebar">
   <div class="brand" id="brandBtn" title="主菜单"><img class="brand-logo" src="../build/icon.png" alt=""><span>LightPlayer</span><span class="brand-caret">${icon('chevron')}</span></div>
   <div class="app-menu hidden" id="appMenu">
-    <div class="menu-item" id="menuOpen">打开视频…</div>
+    <div class="menu-item" id="menuOpen"><span class="mi-main"><span class="mi-ico">${icon('folderOpen')}</span>打开视频…</span></div>
     <div class="menu-group">
-      <span class="mg-label">字幕</span><span class="menu-arrow">${icon('chevron')}</span>
+      <span class="mg-label"><span class="mi-ico">${icon('cc')}</span>字幕</span><span class="menu-arrow">${icon('chevron')}</span>
       <div class="sub-menu">
         <div class="menu-item menu-item-switch"><span>字幕显示</span><span class="switch" id="capVisSwitchMenu"></span></div>
         <div class="cap-enabled">
@@ -53,18 +59,18 @@ app.innerHTML = `
         <div class="menu-item" id="mnuOpenStyle">字幕样式</div>
       </div>
     </div>
-    <div class="menu-item" data-modal="settings">设置</div>
+    <div class="menu-item" data-modal="settings"><span class="mi-main"><span class="mi-ico">${icon('gear')}</span>设置</span></div>
     <div class="menu-group" id="themeMenuGroup">
-      <span class="mg-label">主题</span><span class="menu-arrow">${icon('chevron')}</span>
+      <span class="mg-label"><span class="mi-ico">${icon('palette')}</span>主题</span><span class="menu-arrow">${icon('chevron')}</span>
       <div class="sub-menu">
         <div class="menu-item menu-item-radio" data-theme-mode="dark"><span>暗色</span><span class="mi-check" hidden>${icon('check')}</span></div>
         <div class="menu-item menu-item-radio" data-theme-mode="light"><span>亮色</span><span class="mi-check" hidden>${icon('check')}</span></div>
         <div class="menu-item menu-item-radio" data-theme-mode="system"><span>跟随系统</span><span class="mi-check" hidden>${icon('check')}</span></div>
       </div>
     </div>
-    <div class="menu-item" data-modal="data">数据管理</div>
-    <div class="menu-item" data-modal="hotkeys">快捷键</div>
-    <div class="menu-item" data-modal="about">关于</div>
+    <div class="menu-item" data-modal="data"><span class="mi-main"><span class="mi-ico">${icon('database')}</span>数据管理</span></div>
+    <div class="menu-item" data-modal="hotkeys"><span class="mi-main"><span class="mi-ico">${icon('keyboard')}</span>快捷键</span></div>
+    <div class="menu-item" data-modal="about"><span class="mi-main"><span class="mi-ico">${icon('info')}</span>关于</span></div>
   </div>
   <span class="title" id="windowTitle">本地视频播放器</span>
   <div class="theme-quick" id="themeQuickPop" hidden>
