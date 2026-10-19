@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('lightPlayer', {
   exportSrt: payload => ipcRenderer.invoke('captions:export-srt', payload),
   setHwAccel: enabled => ipcRenderer.invoke('settings:hw-accel', enabled),
   getHwAccel: () => ipcRenderer.invoke('settings:hw-accel', null),
+  setCloseToTray: enabled => ipcRenderer.invoke('settings:close-to-tray', enabled),
+  getCloseToTray: () => ipcRenderer.invoke('settings:close-to-tray'),
   saveSession: payload => ipcRenderer.invoke('session:save', payload),
   loadSession: () => ipcRenderer.invoke('session:load'),
   openFolder: dir => ipcRenderer.invoke('shell:open-folder', dir),
@@ -23,5 +25,7 @@ contextBridge.exposeInMainWorld('lightPlayer', {
   // 主题：系统亮/暗查询 + 变化订阅 + 通知主进程当前模式（同步原生控件配色）
   getSystemTheme: () => ipcRenderer.invoke('theme:system'),
   setThemeMode: mode => ipcRenderer.send('theme:mode', mode),
-  onSystemThemeChange: callback => ipcRenderer.on('theme:system-changed', (_, data) => callback(!!(data && data.dark)))
+  onSystemThemeChange: callback => ipcRenderer.on('theme:system-changed', (_, data) => callback(!!(data && data.dark))),
+  // 托盘菜单动作：'open-video' / 'close-video'（主进程菜单项触发）
+  onTrayAction: callback => ipcRenderer.on('tray:action', (_, action) => callback(String(action || '')))
 });

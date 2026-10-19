@@ -47,7 +47,9 @@ LightPlayer 是一个基于 **Electron** 的桌面端本地视频/音频播放�
 ### 功能特性
 
 - 本地视频/音频播放（MP4、MKV、WebM、MOV、AVI、M4V、MP3、WAV、FLAC）
-- 播放画面交互：单击画面播放/暂停（延迟 250ms 等双击判定）、双击切换全屏；**暂停时画面中心显示半透明圆形播放图标，点击图标或画面任意处都能继续播放**（普通与全屏一致，空状态下不显示）
+- **关闭到托盘**（设置 → 通用，默认开启）：点标题栏 × 只最小化到系统托盘，播放状态保留；托盘右键菜单「显示LightPlayer / 打开视频… / 关闭视频 / 退出LightPlayer」，左键单击托盘图标唤回窗口
+- **单实例**：软件已打开时再次点击快捷方式/exe，不新开进程，直接把已打开窗口还原并置顶
+- 播放画面交互：单击画面播放/暂停（延迟 250ms 等双击判定）、双击切换全屏；**暂停时画面中心显示半透明圆角矩形播放图标（白底 + 白三角），点击图标或画面任意处都能继续播放**（普通与全屏一致，空状态下不显示）
 - 播放列表管理（按文件夹分组、可折叠、去重）
 - 续播记忆（进度 / 播放列表）；「自动开播」（默认关）决定载入后是否起播，「自动定位上次观看位置」（默认开）决定是否跳到上次进度
 - 播放后操作（无操作 / 自动连播 / 循环播放）；播放设置通过右侧工具组齿轮按钮弹出**浮层**（与字幕/音量/倍速同组同风格），左上角菜单「设置」仍打开完整设置弹窗，两处控件共享同一份状态
@@ -72,7 +74,7 @@ LightPlayer 是一个基于 **Electron** 的桌面端本地视频/音频播放�
 
 > 历史版本曾依赖用户自装 Python + PyTorch（CUDA 包约 2.6GB）。现已**完全移除 Python 链路**，改用随包分发的原生 ONNX Runtime（约 22MB），无任何运行期安装步骤。
 
-Electron 内置模块：`app`、`BrowserWindow`、`dialog`、`ipcMain`、`contextBridge`、`ipcRenderer`、`webUtils`、`utilityProcess`；Node 内置模块：`path`、`fs`、`os`、`https`、`http`、`child_process`（`spawn` / `spawnSync`）。
+Electron 内置模块：`app`、`BrowserWindow`、`dialog`、`ipcMain`、`Menu`、`Tray`、`nativeImage`、`contextBridge`、`ipcRenderer`、`webUtils`、`utilityProcess`；Node 内置模块：`path`、`fs`、`os`、`https`、`http`、`child_process`（`spawn` / `spawnSync`）。
 
 ### 2.2 外部运行时（按需自动下载，非 npm）
 
@@ -165,6 +167,7 @@ LightPlayer/
 ├── build/
 │   ├── icon.ico            # Windows 应用图标
 │   ├── icon.png            # 界面内图标（标题栏左上角 / 关于弹窗引用）
+│   ├── tray.png            # 系统托盘图标（32px 圆形，由 icon.png 生成）
 │   └── after-build.js      # electron-builder 收尾钩子：构建后删除中间产物
 └── src/
     ├── main.js             # 主进程（286 行）：窗口/对话框/IPC/ASR worker 管理
@@ -185,14 +188,18 @@ LightPlayer/
 
 ### 5.1 `src/main.js`（主进程）
 
-1. **启动配置**：自动播放策略、硬件加速 marker。
-2. **窗口管理**：无边框窗口、最小化/最大化/关闭。
-3. **系统对话框**：打开视频、打开文件夹（递归扫描扩展名并自然序排序）、打开字幕、SRT 保存。
-4. **文件系统能力**：`session.json` 落盘、硬件加速 marker、字幕缓存读取/清除（清除前先优雅停止识别会话）、SRT 导出（UTF-8 BOM）。
-5. **ASR worker 管理**：`utilityProcess.fork` 常驻 worker；转发 worker 消息为 `asr:event`；管理会话 id、等待会话结束、退出时清理。
+1. **启动配置**：单实例锁（`requestSingleInstanceLock`，失败即 `app.quit()`）、自动播放策略、硬件加速 marker、Windows AppUserModelID（`com.lightplayer.desktop`）。
+2. **窗口管理**：无边框窗口、最小化/最大化/关闭、关闭到托盘（close 事件拦截）。
+3. **托盘**：`build/tray.png` 常驻托盘、右键菜单（显示 / 打开视频 / 关闭视频 / 退出）、左键单击唤回窗口。
+4. **系统对话框**：打开视频、打开文件夹（递归扫描扩展名并自然序排序）、打开字幕、SRT 保存。
+5. **文件系统能力**：`session.json` 落盘、硬件加速与关闭到托盘 marker、字幕缓存读取/清除（清除前先优雅停止识别会话）、SRT 导出（UTF-8 BOM）。
+6. **ASR worker 管理**：`utilityProcess.fork` 常驻 worker；转发 worker 消息为 `asr:event`；管理会话 id、等待会话结束、退出时清理。
 
 关键设计：
 
+- **单实例**：`app.requestSingleInstanceLock()` 在文件顶部执行；第二个进程立即退出，第一个进程在 `second-instance` 里调 `revealMainWindow()`（还原最小化 → show → focus），因此不会新开窗口。
+- **关闭到托盘**：`mainWindow.on('close')` 中若 `!appQuitting && closeToTrayOn` 则 `e.preventDefault()` + `win.hide()`，保持静默（不弹系统通知、不弹托盘气泡，用户明确要求无打扰）。`appQuitting` 只由托盘「退出」`{ appQuitting = true; app.quit(); }` 和 `before-quit` 置位。状态存 `userData/close-to-tray.json`（与 `hw-accel.json` 同一套 marker 机制，因为读 localStorage 的主进程拿不到渲染端设置），不带参数调用 `settings:close-to-tray` 即读取。
+- **托盘生命周期**：`createTray()` 仅在 `closeToTrayOn` 为真时创建；开关关闭时 `tray.destroy()` 并置 `null`，不再驻留。
 - `resolveAsrWorker()`：开发模式返回 `src/asr/asr_worker.js`；打包模式返回 `app.asar.unpacked/src/asr/asr_worker.js`（worker 与原生模块都在 asarUnpack 中）。
 - `ensureAsrDaemon(sender)`：懒启动唯一常驻 worker，`stdio: ['ignore','ignore','pipe']`（stderr 用于错误诊断）；监听 `proc.on('message')` 与 `proc.on('exit')`。
 - **会话串行化**：每次 `asr:start` 携带自增 `sid`，渲染端据此丢弃旧会话残留事件；停止/切换只影响当前 sid。
@@ -203,9 +210,9 @@ LightPlayer/
 
 `contextBridge.exposeInMainWorld('lightPlayer', {...})`，全部为薄封装：
 
-- `invoke`：`openVideo`、`openVideoFolder`、`openSubtitle`、`readCaptionCache`、`clearCaptionCache`、`clearAllCaptionCaches`、`exportSrt`、`setHwAccel`、`getHwAccel`、`saveSession`、`loadSession`、`startAsr`。
+- `invoke`：`openVideo`、`openVideoFolder`、`openSubtitle`、`readCaptionCache`、`clearCaptionCache`、`clearAllCaptionCaches`、`exportSrt`、`setHwAccel`、`getHwAccel`、`setCloseToTray`、`getCloseToTray`、`saveSession`、`loadSession`、`startAsr`。
 - `send`：`stopAsr`、`seekAsr`、`minimize`、`maximize`、`close`。
-- 事件订阅：`onAsrEvent(callback)`。
+- 事件订阅：`onAsrEvent(callback)`、`onTrayAction(callback)`（收到 `'open-video'` / `'close-video'`）。
 - 工具：`pathForFile(file)`（`webUtils.getPathForFile`，回退 `file.path`）。
 
 > 已移除的旧 API：`openModelDirectory`、`startGpuSetup`、`cancelGpuSetup`、`onGpuSetupEvent`。
@@ -220,6 +227,9 @@ LightPlayer/
 - **字幕**：外部字幕解析、样式、实时字幕事件处理、SRT 导出。
 - **实时字幕阶段 UI**：三阶段步骤条（**准备识别模型 → 分析视频音频 → 实时转写**）+ 进度条 + 引擎徽章（固定显示“SenseVoice · CPU”）。
 - **数据管理 / 快捷键 / 弹窗 / 自绘窗口按钮**。
+- **托盘动作**：`window.lightPlayer.onTrayAction(action => …)` —— `'open-video'` 调 `openFiles()`，`'close-video'` 先 `saveProgress()`/`savePlaylistState()` 再 `stopPlayback()`（等同「关闭视频」回到空状态）。
+
+设置弹窗分两栏：**通用**（`#closeToTray`，默认开启）在最前，其后是**播放设置**。关闭到托盘走 `setCloseToTray()`：写 localStorage + `setCloseToTray` IPC 即时通知主进程，启动时再以主进程返回值（marker 为准）校正 UI。
 
 实时字幕相关 UI 状态：`asrSid`（当前会话 id）、`STAGES=['model','audio','transcribe']`、`STAGE_LABELS`、`setDeviceBadge`、`updateAsrProgress`、`setAsrUi`、`startAsrRun`、`toggleAsr`、`turnAsrOff`。
 
@@ -258,6 +268,10 @@ LightPlayer/
 | 函数 | 说明 |
 | --- | --- |
 | `readHwAccel()` | 读 `userData/hw-accel.json`，默认启用硬件加速。 |
+| `readCloseToTray()` / `writeCloseToTray(enabled)` | 读写 `userData/close-to-tray.json`（默认开启）。写入时同步 `closeToTrayOn`；关闭时销毁托盘。 |
+| `createWindow()` | 创建无边框窗口；`close` 事件在 `!appQuitting && closeToTrayOn` 时 `preventDefault()` + `hide()`（保持静默，不弹通知）；`closed` 时清空 `mainWindow`。 |
+| `revealMainWindow()` | 从托盘 / 二次启动唤回：`restore()` → `show()` → `focus()`；窗口已销毁则新建。 |
+| `createTray()` / `trayMenu()` / `sendToRenderer(action)` | 托盘图标与右键菜单（显示LightPlayer / 打开视频… / 关闭视频 / 退出LightPlayer）；菜单动作转 `tray:action` 发给渲染端。隐藏到托盘保持静默，不弹通知。 |
 | `resolveAsrWorker()` | 返回 worker 路径（开发源码 / 打包后的 app.asar.unpacked）。 |
 | `killProcessTree(proc)` | Windows 下 `taskkill /F /T` 结束进程树（带走 ffmpeg 孙进程）。 |
 | `ensureAsrDaemon(sender)` | 懒启动唯一常驻 utilityProcess，绑定 message/exit 转发。 |
@@ -283,6 +297,7 @@ LightPlayer/
 | `syncPlaySettingsUi()` / `reloadPlaySettings()` | 播放设置双 UI 同步：弹层（`pop*` 前缀 id）与设置弹窗各有一套控件，改值一律走 setter（`setAfterPlay/setResumePlay/...`）落盘后由 `syncPlaySettingsUi()` 按状态刷新两处，**不读 DOM 类名**避免漂移；`reloadPlaySettings()` 在「数据管理」清空设置后把内存 `settings/hwAccelOn` 重新按默认值读回并同步，防止清空后 UI 仍显示旧值。 |
 | `buildGroups/renderPlaylist/loadFile/fileUrl` | 列表分组渲染、文件载入、`file:///` URL 构造、自动播放静音回退。 |
 | `setPlayIcon()` | 同步主工具栏 `#play` / 全屏 `#fsPlay` 图标，并按 `video.paused && activeFile` 显隐画面中心播放图标 `#centerPlay`（`onplay`/`onpause`/载入/停止均调用）。`#centerPlay` 的 `onclick` 只做 `video.play()` 并 `stopPropagation()`，避免冒泡到 `#videoWrap` 的单击切换后又立刻暂停；同时记下 `centerPlayGuardAt`，让双击的第二下（此时图标已隐藏、落点在画面上）不误触全屏。 |
+| `setCloseToTray(on)` / `syncCloseToTrayUi()` | 通用设置「关闭到托盘」：写 localStorage + `setCloseToTray` IPC（主进程即时生效），启动时 `getCloseToTray()` 以 marker 校正 UI。 |
 | `startAsrRun/toggleAsr/turnAsrOff` | 启动（等元数据→`startAsr`）、开关、关闭复位。 |
 | `updateAsrProgress/setStepState/setDeviceBadge/setAsrUi` | 阶段/进度/徽章/开关 UI。 |
 | `onAsrEvent` | 处理 `status/captions/caption/stopped/error/done/exit`，按 sid 过滤。 |
@@ -329,12 +344,14 @@ LightPlayer/
 | `captions:clear-cache` / `captions:clear-all-caches` | invoke | 删除缓存（先停识别会话） |
 | `captions:export-srt` | invoke | `{video, srt}` → `{ok, path}` / `{ok:false,message}` |
 | `settings:hw-accel` | invoke | 读/写硬件加速 marker |
+| `settings:close-to-tray` | invoke | 带 `boolean` 即写入关闭到托盘 marker 并即时生效（关→销毁托盘，开→创建托盘）；不带参数返回当前值 |
 | `session:save` / `session:load` | invoke | 播放列表会话落盘/读取 |
 | `asr:start` | invoke | 入参 `{video, duration, start, chunk?}`；返回 `{ok, sid}`。**modelDir 由主进程解析，渲染端不再传模型路径/设备** |
 | `asr:stop` | send | 停止当前会话（常驻 worker 与模型保留） |
 | `asr:seek` | send | `{start, rate, seek?}` |
-| `window:minimize/maximize/close` | send | 窗口控制 |
+| `window:minimize/maximize/close` | send | 窗口控制（关闭到托盘开启时 `window:close` 只隐藏窗口且不销毁 ASR worker） |
 | `asr:event` | send（M→R） | worker 事件转发 |
+| `tray:action` | send（M→R） | 托盘菜单动作，载荷为 `'open-video'` / `'close-video'` |
 
 ### 7.2 主进程 ↔ ASR Worker（utilityProcess MessagePort）
 
@@ -385,6 +402,7 @@ LightPlayer/
 | `lightplayer-asr-cache` | 是否使用缓存开关（默认 `false`：实时字幕不读也不写视频同目录缓存） |
 | `lightplayer-after-play` | `none/next/loop` |
 | `lightplayer-hw-accel` | 硬件加速开关 |
+| `lightplayer-close-to-tray` | 关闭到托盘开关（默认 `true`；真实来源是主进程 marker，启动时以 marker 校正） |
 | `lightplayer-hotkeys` | 快捷键映射 |
 | `lightplayer-caption-style` | 字幕样式对象 |
 | `lightplayer-caption-visible` / `lightplayer-asr-enabled` | 字幕显示 / 实时字幕开关 |
@@ -397,6 +415,7 @@ LightPlayer/
 | --- | --- |
 | `userData/session.json` | 播放列表同步落盘 |
 | `userData/hw-accel.json` | `{enabled}` 硬件加速 marker |
+| `userData/close-to-tray.json` | `{enabled}` 关闭到托盘 marker（主进程在窗口 close 时据此决定隐藏还是退出，并决定托盘是否创建） |
 | `%LOCALAPPDATA%\LightPlayer\models\sensevoice-2024-07-17\` | 识别模型三件套（+ `.part` 下载临时分片） |
 | `%LOCALAPPDATA%\LightPlayer\runtime\ffmpeg\bin\` | 自动下载的 ffmpeg/ffprobe（PATH 已有则不落盘） |
 | `<视频名>.lightplayer-subs.json` | 视频同目录字幕缓存 |
@@ -447,7 +466,11 @@ PATH 中找不到 ffmpeg 时按序下载 zip：① `www.gyan.dev` release-essent
 
 ### 10.1 启动与会话恢复
 
-读硬件加速 marker → 建窗 → 恢复音量/倍速 →（记住列表时）优先读 `session.json` 回退 localStorage，恢复列表与上次视频并按开关自动续播。
+抢单实例锁（失败即退出）→ 读硬件加速 marker（决定是否 `disableHardwareAcceleration`）→（Windows）设 AppUserModelID → ready 后注册全部 IPC → 建窗 → 按 `close-to-tray.json` 创建托盘 → 恢复音量/倍速 →（记住列表时）优先读 `session.json` 回退 localStorage，恢复列表与上次视频并按开关自动续播。
+
+**再次启动**：第二个进程拿不到锁立即 `app.quit()`；第一个进程收到 `second-instance` 后 `revealMainWindow()`，窗口从隐藏/最小化回到最前。
+
+**关闭**：设置里「关闭到托盘」开启（默认）时标题栏 × 与 Alt+F4 都只隐藏窗口、进程与播放状态保留，托盘图标常驻；托盘菜单「退出LightPlayer」置 `appQuitting = true` 后才真正关闭。关闭到托盘关闭时 × 直接退出进程。
 
 ### 10.2 打开/切换视频
 
@@ -571,6 +594,10 @@ npx electron-builder --win zip
 20. **同一批设置的第二套控件必须状态驱动**：播放设置同时存在于工具栏弹层（`pop*` id）与设置弹窗两处，若沿用旧写法（`el.classList.toggle('on')` 就地翻转 DOM 类再各自落盘），另一处不会跟着变。现改为 setter 落盘 → `syncPlaySettingsUi()` 按状态刷新两处；另外「数据管理 → 清除播放器设置 / 清除全部」只删 localStorage，内存里的 `settings/hwAccelOn` 不会自动归位，必须调 `reloadPlaySettings()`，否则清空后 UI 仍显示旧值。
 21. **画面中心播放图标不能是 `<button>`**：按钮被点击后会获得焦点，之后按空格会同时触发原生按钮激活与全局「播放/暂停」快捷键，一次按键切换两次。现用 `div[role=button]`，并在其 `onclick` 中 `stopPropagation()`（否则冒泡到 `#videoWrap` 的单击逻辑，`play()` 之后又被 `pause()`）；显隐统一由 `setPlayIcon()` 依据 `video.paused && activeFile` 驱动，`z-index:80` 低于音量/时间提示（90/95）、高于视频与字幕，全屏下同样可见。
 22. **中心播放按钮的白色透明底在亮画面上会“消失”**：该图标样式为圆角矩形（`.center-play`，普通 74×52 / 全屏 80×56，保持约 1.42 : 1 长宽比，`border-radius:12px/14px`）+ `rgba(255,255,255,.26)` 白底 + 白色三角。实测全屏播放测试图（整片亮黄）时，`backdrop-filter` 模糊会把背景冲成淡白，仅有底色根本无法分辨按钮边界。**不做边框，轮廓只靠阴影撑住**，因此需要近远两层互补：`0 2px 6px rgba(0,0,0,.45)` 贴边形成清晰轮廓、`0 10px 26px rgba(0,0,0,.34)` 负责浮起的立体感；再加 `inset 0 0 0 1px rgba(0,0,0,.14)` 作防糊补丁。白三角另加 `drop-shadow(0 1px 2px rgba(0,0,0,.55))`，防止落到白色底上溶掉。
+23. **`app.requestSingleInstanceLock()` 返回 false 后必须立刻 `app.quit()` 并跳过后续初始化**：否则第二个进程会照常建窗、建托盘、抢 `userData` 的 marker，出现双托盘、双播放器。唤醒动作只能放在第一个进程的 `app.on('second-instance')` 里：仅 `show()` 不会把窗口带到前台，必须先 `restore()`（最小化态）再 `show()` + `focus()`。
+24. **关闭到托盘的状态不能只存 localStorage**：窗口 `close` 事件在主进程执行，主进程读不到渲染端 localStorage。沿用硬件加速那套 marker 文件（`userData/close-to-tray.json`），并在两处都对“无 marker = 默认 true”做兜底；渲染端启动后用 `getCloseToTray()` 以 marker 为准校正 UI，避免两边显示不一致。
+25. **托盘与 ASR worker 生命周期**：「关闭到托盘」开启时 `window:close` 只隐藏窗口，**不能**顺手 `shutdownAsrDaemon()`，否则从托盘恢复后实时字幕要从零冷启动；真正退出统一由 `before-quit` 清理。反过来，开关被关闭时要 `tray.destroy()` 并置 `null`，否则托盘图标会变成“点了没反应”的僵尸图标。
+26. **`window-all-closed` 里不能改成“仅 `appQuitting` 才退”**：关闭被拦截时窗口从未真正销毁，该事件根本不会触发，贸然加条件反而让“关闭到托盘已关闭 → 点 ×”退不出去。维持原逻辑 `if (process.platform !== 'darwin') app.quit()`，退出与否完全由 `close` 拦截决定。
 
 ---
 

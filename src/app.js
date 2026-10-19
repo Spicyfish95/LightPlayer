@@ -256,6 +256,7 @@ app.innerHTML = `
   <div class="modal modal-sm">
     <div class="modal-head"><h3>设置</h3><button class="modal-close" data-close>${icon('close')}</button></div>
     <div class="modal-body">
+      <div class="section sec-general"><h3>通用</h3><div class="settings-row">关闭到托盘 <div class="switch" id="closeToTray"></div></div></div>
       <div class="section sec-play"><h3>播放设置</h3><div class="settings-row">播放后操作
         <select class="select" id="afterPlay" style="width:150px">
           <option value="none">暂停</option>
@@ -373,6 +374,7 @@ const settings = {
   autoPlay: store.get('auto-play', false),       // 自动开播（默认关闭）：开启才在视频载入后自动播放
   asrCache: store.get('asr-cache', false),        // 是否使用缓存（默认关闭）：关闭时实时字幕不读写缓存
   asrLanguage: store.get('asr-language', 'auto'), // 识别语言（auto/zh/en/yue/ja/ko，默认自动）
+  closeToTray: store.get('close-to-tray', true),  // 关闭到托盘（默认开启）：关闭窗口时隐藏到托盘而非退出（以主进程 marker 为准，见 setCloseToTray）
 };
 function saveProgress() {
   if (!settings.resumePlay || !activeFile || !isFinite(video.duration) || video.duration <= 0) return;
@@ -1079,6 +1081,34 @@ bindSwitchPair('popHwAccel', 'hwAccel', () => hwAccelOn, setHwAccel);
 // 播放后操作下拉：两处共用 setAfterPlay
 $('#afterPlay').onchange = e => setAfterPlay(e.target.value);
 $('#popAfterPlay').onchange = e => setAfterPlay(e.target.value);
+
+/* ---------- 通用设置：关闭到托盘 ----------
+   开关状态以主进程 marker 文件（userData/close-to-tray.json）为准：窗口关闭行为在主进程执行，
+   localStorage 主进程读不到；localStorage 只作渲染端启动时的初值，随后用主进程返回值校正，
+   万一两边不一致（例如手动删了 marker），以能真正决定关闭行为的 marker 为准。 */
+function syncCloseToTrayUi() { $('#closeToTray').classList.toggle('on', settings.closeToTray); }
+function setCloseToTray(on) {
+  settings.closeToTray = !!on;
+  store.set('close-to-tray', settings.closeToTray);
+  window.lightPlayer.setCloseToTray(settings.closeToTray);   // 主进程即时生效：关闭时销毁托盘，开启时建回托盘
+  syncCloseToTrayUi();
+}
+$('#closeToTray').onclick = () => setCloseToTray(!settings.closeToTray);
+// 启动时与主进程对齐（托盘是否已创建也由主进程按同一份 marker 决定）
+window.lightPlayer.getCloseToTray().then(v => {
+  if (typeof v !== 'boolean' || v === settings.closeToTray) return;
+  settings.closeToTray = v;
+  store.set('close-to-tray', v);
+  syncCloseToTrayUi();
+});
+syncCloseToTrayUi();
+
+// 托盘右键菜单动作：「打开视频…」走与 Ctrl+O 相同的文件对话框通道；「关闭视频」等同移除当前视频（回到空状态）。
+// 不传事件参数：openFiles() 不接受也不使用传参。
+window.lightPlayer.onTrayAction(action => {
+  if (action === 'open-video') openFiles();
+  else if (action === 'close-video') { saveProgress(); savePlaylistState(); stopPlayback(); }
+});
 // 「数据管理」清空设置后调用：内存中的 settings/hwAccelOn 仍是旧值（localStorage 已被清空），
 // 需重新按默认值读回并同步两处 UI，否则弹层与设置弹窗会继续显示已被清除的旧状态。
 function reloadPlaySettings() {

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, utilityProcess, nativeTheme, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, Tray, nativeImage, utilityProcess, nativeTheme, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawnSync } = require('child_process');
@@ -8,8 +8,38 @@ let asrNextSid = 1;      // 会话自增 id（渲染端据此过滤旧会话残�
 const asrSidWaiters = new Map();   // sid → resolve()，等待某会话停止/结束
 let asrActiveSid = 0;    // 当前运行中的会话 sid（0 表示空闲）
 
+// 单实例：再次点击快捷方式 / exe 不再新开进程，而是把已打开的窗口唤到最前（见 app.requestSingleInstanceLock）
+if (!app.requestSingleInstanceLock()) app.quit();
+
 // 本地播放器场景：允许无用户手势自动播放（重启后自动续播上次视频依赖此能力）
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
+// 任务栏身份：打包版 AppUserModelID 由 electron-builder 按 appId 设置；开发模式不设置则任务栏按钮无归属。
+if (process.platform === 'win32') app.setAppUserModelId('com.lightplayer.desktop');
+
+let mainWindow = null;      // 主窗口（唯一）
+let appQuitting = false;    // 真正退出（托盘菜单「退出」或系统关闭）时为 true，close 事件据此区分“关闭”与“隐藏到托盘”
+let closeToTrayOn = true;   // 关闭到托盘开关（渲染端写 userData/close-to-tray.json，主进程据此决定关闭按钮的行为）
+
+// 关闭到托盘：与硬件加速开关同一套路（marker 文件），因为窗口的关闭行为在主进程，读不到渲染端 localStorage。
+// enabled 省略时仅读取；默认开启。
+function closeToTrayMarker() { return path.join(app.getPath('userData'), 'close-to-tray.json'); }
+function readCloseToTray() {
+  try {
+    const marker = closeToTrayMarker();
+    if (fs.existsSync(marker)) return JSON.parse(fs.readFileSync(marker, 'utf8')).enabled !== false;
+  } catch (_) {}
+  return true;
+}
+function writeCloseToTray(enabled) {
+  try {
+    fs.writeFileSync(closeToTrayMarker(), JSON.stringify({ enabled: !!enabled }));
+    closeToTrayOn = !!enabled;
+    if (!closeToTrayOn && tray) { tray.destroy(); tray = null; }   // 关掉后托盘图标不再驻留
+    return true;
+  } catch (_) { return false; }
+}
+closeToTrayOn = readCloseToTray();
 
 // 硬件加速开关：由渲染进程通过 marker 文件持久化，主进程启动时读取
 // （Electron 的 GPU 开关必须在 app ready 之前设置，localStorage 主进程无法访问）
@@ -46,7 +76,65 @@ function createWindow() {
   const win = new BrowserWindow({ width: 1440, height: 900, minWidth: 1080, minHeight: 680, backgroundColor: '#080b12', frame: false, icon: path.join(__dirname, '..', 'build', 'icon.ico'), webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
   // win.webContents.openDevTools();
   win.loadFile(path.join(__dirname, 'index.html'));
+  // 关闭到托盘：点标题栏 ×（或 Alt+F4）不退出、不弹通知，只隐藏窗口，应用与播放状态都留在后台。
+  // 只有 appQuitting（托盘菜单「退出」/ 系统关机）时才真正关闭，避免托盘菜单的「退出」也被拦成隐藏。
+  win.on('close', e => {
+    if (appQuitting || !closeToTrayOn) return;
+    e.preventDefault();
+    win.hide();
+  });
+  win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
+  return win;
 }
+
+/* ---------- 托盘（关闭到托盘 / 托盘右键菜单） ---------- */
+const APP_NAME = 'LightPlayer';
+let tray = null;
+
+// 窗口从托盘 / 任务栏唤回：隐藏的只 show 不会自动成前台，必须再 focus（Windows 下最小化状态要先 restore）
+function revealMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) { mainWindow = createWindow(); return; }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.focus();
+}
+
+// 托盘菜单里的「打开视频 / 关闭视频」转给渲染端执行：打开走系统文件对话框（与 Ctrl+O 同一条路径），
+// 关闭走 stopPlayback（等同移除当前视频，回到空状态）。统一走 tray:action，渲染端按 action 分发。
+function sendToRenderer(action) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const send = () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('tray:action', action);
+  };
+  // 窗口刚创建 / 正在重载时 webContents.send 会丢包，等页面加载完成再发
+  if (mainWindow.webContents.isLoading()) mainWindow.webContents.once('did-finish-load', send);
+  else send();
+}
+
+// 托盘右键菜单。每次单独构造一份：Windows 在弹出瞬间取当前 Menu，菜单项状态变了重建即可生效（旧对象由 GC 回收）
+// 「关闭视频」始终发给渲染端，由渲染端判断当前有没有视频（没有时 stopPlayback 本身是幂等的），菜单不必随状态变化。
+function trayMenu() {
+  return Menu.buildFromTemplate([
+    { label: `显示${APP_NAME}`, click: () => revealMainWindow() },
+    { type: 'separator' },
+    { label: '打开视频…', click: () => sendToRenderer('open-video') },
+    { label: '关闭视频', click: () => sendToRenderer('close-video') },
+    { type: 'separator' },
+    { label: `退出${APP_NAME}`, click: () => { appQuitting = true; app.quit(); } }
+  ]);
+}
+
+function createTray() {
+  if (tray || !closeToTrayOn) return;
+  // 32px PNG（由 build/icon.png 缩出的圆形图标）：Windows 托盘 16px、缩放 125%/150% 时取 20/24px，交给系统缩放
+  tray = new Tray(nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'tray.png')));
+  tray.setToolTip(APP_NAME);
+  tray.setContextMenu(trayMenu());
+  // 左键单击 / 双击直接唤回窗口；右键菜单由 Windows 自动弹出，不用自己处理
+  tray.on('click', () => revealMainWindow());
+  tray.on('double-click', () => revealMainWindow());
+}
+
 app.whenReady().then(() => {
   // 硬件加速设置持久化（marker 文件 + localStorage 双写，保证主进程下次启动能读到）
   ipcMain.handle('settings:hw-accel', (event, enabled) => {
@@ -278,14 +366,28 @@ app.whenReady().then(() => {
   });
   ipcMain.on('window:minimize', e => BrowserWindow.fromWebContents(e.sender)?.minimize());  ipcMain.on('window:maximize', e => { const w = BrowserWindow.fromWebContents(e.sender); w.isMaximized() ? w.unmaximize() : w.maximize(); });
   ipcMain.on('window:close', e => {
-    shutdownAsrDaemon();
+    // 关闭到托盘时窗口只是隐藏、进程仍在，不结束 ASR 常驻 worker，
+    // 否则从托盘恢复后继续识别要从零冷启动；真正退出由 before-quit 兜底清理。
+    if (!closeToTrayOn) shutdownAsrDaemon();
     BrowserWindow.fromWebContents(e.sender)?.close();
   });
+
+  // 关闭到托盘设置（渲染端写入 → 主进程即时生效；不带参数时为读取）
+  ipcMain.handle('settings:close-to-tray', (event, enabled) => (
+    typeof enabled === 'boolean' ? writeCloseToTray(enabled) : closeToTrayOn
+  ));
+
   // 应用整体退出时兜底关闭常驻 worker（utilityProcess 子进程也会随父进程退出）
-  app.on('before-quit', shutdownAsrDaemon);
-  createWindow();
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  app.on('before-quit', () => { appQuitting = true; shutdownAsrDaemon(); });
+  mainWindow = createWindow();
+  createTray();   // 关闭到托盘开启时驻留托盘；单实例再次启动由托盘 / revealMainWindow 唤回同一个窗口
+  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow(); });
+
+  // 第二个实例被唤醒：这是用户又点了一次快捷方式 / exe，把已打开的窗口还原并顶到最前，不新开进程
+  app.on('second-instance', () => revealMainWindow());
 });
+// 关闭到托盘时窗口全部隐藏并不等于退出：只有 appQuitting 才真正退出（托盘「退出」或系统关机）。
+// 注意 close-window 被拦截时窗口从未真正销毁，window-all-closed 不会触发，这里只是退出路径的最后一道闸。
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 
 // 开发模式热更新：监听 src 目录变更并自动刷新渲染进程，保存代码后即可预览结果。
