@@ -86,6 +86,9 @@ app.innerHTML = `
 <main class="main">
   <div class="video-wrap" id="videoWrap">
     <video id="video" preload="metadata"></video>
+    <!-- 暂停时画面中心的半透明播放按钮：点击图标或画面都能继续播放（全屏同样显示）。
+         刻意用 div[role=button] 而非 <button>：按钮获得焦点后空格会同时触发原生激活与全局播放快捷键，导致一次按键切换两次。 -->
+    <div class="center-play hidden" id="centerPlay" role="button" aria-label="播放">${icon('play')}</div>
     <div class="empty-state" id="empty"><div class="empty-icon">${icon('video')}</div><h2>打开一个视频开始播放</h2><p>支持 MP4、MKV、WebM、MOV 等格式</p><div class="drop-hint">拖放文件到此处，或按 Ctrl + O</div><button class="btn" id="emptyOpenBtn">打开视频…</button></div>
     <div class="top-chip hidden" id="qualityChip">原画</div>
     <div class="resume-toast hidden" id="resumeToast">
@@ -729,10 +732,25 @@ async function openFiles() { const files = await window.lightPlayer.openVideo();
 async function openFolder() { const files = await window.lightPlayer.openVideoFolder(); if (files?.length) { playlist = [...new Set([...playlist, ...files])]; loadFile(files[0]); renderPlaylist(); savePlaylistState(); } else { $('#fileMeta').textContent = '该文件夹内未找到支持的视频'; } }
 
 /* ---------- 播放控制 ---------- */
-const setPlayIcon = () => { const html = video.paused ? icon('play') : icon('pause'); $('#play').innerHTML = html; $('#fsPlay').innerHTML = html; };
+// 暂停时画面中心显示半透明播放图标（空状态/未载入视频时不显示）；普通与全屏共用同一个节点
+const setPlayIcon = () => {
+  const html = video.paused ? icon('play') : icon('pause');
+  $('#play').innerHTML = html; $('#fsPlay').innerHTML = html;
+  $('#centerPlay').classList.toggle('hidden', !video.paused || !activeFile);
+};
 function updateMuteIcons() { const html = video.muted ? icon('mute') : icon('volume'); $('#mute').innerHTML = html; $('#fsMute').innerHTML = html; }
 $('#addPlaylistBtn').onclick = openFiles; $('#addFolderBtn').onclick = openFolder; $('#clearPlaylistBtn').onclick = clearPlaylist;
 $('#play').onclick = () => video.paused ? video.play() : video.pause();
+// 中心播放图标：只负责继续播放；stopPropagation 避免再触发下面 #videoWrap 的单击切换（否则立刻又被暂停）。
+// centerPlayGuardAt 记录点击时刻：图标点下即播放并隐藏，双击的第二下会落到画面上，
+// 若不拦住就会在“继续播放”的同时误切全屏（见下方 dblclick 处理器）。
+let centerPlayGuardAt = 0;
+$('#centerPlay').onclick = e => {
+  e.stopPropagation();
+  centerPlayGuardAt = Date.now();
+  if (!activeFile) return;
+  video.play().catch(() => {});
+};
 $('#back').onclick = () => video.currentTime = Math.max(0, video.currentTime - 10);
 $('#forward').onclick = () => video.currentTime = Math.min(video.duration || 0, video.currentTime + 10);
 /* 音量：按钮位于工具栏右侧，点击弹出子菜单，在子菜单内调音量并显示百分比（普通 / 全屏同步） */
@@ -832,6 +850,7 @@ new ResizeObserver(() => syncCaptionFontSize()).observe(videoWrap);
 // 全屏时浏览器只渲染全屏元素（#videoWrap）子树：把所有弹窗移入其中，
 // 否则全屏下打开字幕样式/实时字幕/设置/确认等弹窗会看不到
 document.querySelectorAll('.modal-overlay').forEach(m => videoWrap.appendChild(m));
+// 中心播放图标自己 stopPropagation 拦掉单击（见上方 onclick），故不必列入跳过名单
 const VIDEO_CLICK_SKIP = '.caption, .empty-state, .top-chip, .resume-toast, .fs-ui, .modal-overlay, .sub-popover, .vol-popover, .play-pop';
 let videoClickTimer = null;
 videoWrap.addEventListener('click', e => {
@@ -842,6 +861,8 @@ videoWrap.addEventListener('click', e => {
 videoWrap.addEventListener('dblclick', e => {
   if (e.target.closest(VIDEO_CLICK_SKIP)) return;
   if (videoClickTimer) { clearTimeout(videoClickTimer); videoClickTimer = null; }
+  // 刚点过中心播放图标：第二下落在画面上，视为“点图标继续播放”，不切全屏
+  if (Date.now() - centerPlayGuardAt < 400) return;
   document.fullscreenElement ? document.exitFullscreen() : videoWrap.requestFullscreen();
 });
 

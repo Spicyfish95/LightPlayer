@@ -238,6 +238,22 @@ input[type=range]{-webkit-appearance:none;appearance:none;background:transparent
 /* 屏幕中间纯文字提示（如时间跳转越界），无按钮、一段时间后消失 */
 .center-toast{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:95;padding:10px 22px;border:1px solid #35405a;border-radius:10px;background:rgba(10,14,22,.86);color:#fff;font-size:14px;letter-spacing:.3px;backdrop-filter:blur(8px);box-shadow:0 12px 34px rgba(0,0,0,.55);pointer-events:none;white-space:nowrap;animation:volToastIn .16s ease-out}
 .center-toast.hidden{display:none}
+/* 暂停时画面中心的半透明播放按钮：只做“继续播放”，点击画面任意处同样生效。
+   位于 #videoWrap 内，普通与全屏共用；z-index 低于音量/时间提示，高于视频与字幕。
+   外观：圆角矩形（非圆形）+ 白色透明底，三角取白色。不做边框，轮廓完全交给阴影，因此需要两层阴影互补：
+   · 外侧近景投影（0 2px 6px 深色）贴住边缘，让按钮在亮画面上有清晰的轮廓；
+   · 外侧远景投影（0 10px 26px）负责“浮起”的立体感，与工具栏按钮的投影语言一致；
+   · 1px 深色内描边只作防糊补丁：亮黄/白画面上 blur 会把白底冲成淡白，此时靠外侧投影响应最明显的那一圈。
+   白三角另加一圈深色小投影，落在白色透明底或亮画面上仍能看清。
+   按钮尺寸两档（普通 74×52 / 全屏 80×56）保持约 1.42 : 1 的长宽比。 */
+.center-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:80;width:74px;height:52px;padding:0;border:none;border-radius:12px;background:rgba(255,255,255,.26);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);box-shadow:0 2px 6px rgba(0,0,0,.45),0 10px 26px rgba(0,0,0,.34),inset 0 0 0 1px rgba(0,0,0,.14);transition:background .16s,transform .16s,box-shadow .16s;animation:centerPlayIn .16s ease-out}
+.center-play .ic{width:28px;height:28px;margin-left:4px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.55))}   /* 三角视觉重心略偏左，右移 4px 居中；深色投影让白三角在亮画面上保持可辨 */
+.center-play:hover{background:rgba(255,255,255,.4);transform:translate(-50%,-50%) scale(1.06);box-shadow:0 3px 8px rgba(0,0,0,.48),0 14px 32px rgba(0,0,0,.4),inset 0 0 0 1px rgba(0,0,0,.16)}
+.center-play:active{transform:translate(-50%,-50%) scale(.97)}
+/* 全屏下画面本身很大，图标只做轻微放大，长宽比与普通态保持一致 */
+.video-wrap:fullscreen .center-play{width:80px;height:56px;border-radius:14px}
+.video-wrap:fullscreen .center-play .ic{width:30px;height:30px;margin-left:4px}
+@keyframes centerPlayIn{from{opacity:0;transform:translate(-50%,-50%) scale(.88)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
 .spacer{flex:1}
 
 /* ---------- 音量子菜单（普通工具栏 / 全屏工具栏共用样式：竖向滑杆 + 音量百分比） ---------- */

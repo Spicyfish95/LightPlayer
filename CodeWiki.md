@@ -47,6 +47,7 @@ LightPlayer 是一个基于 **Electron** 的桌面端本地视频/音频播放�
 ### 功能特性
 
 - 本地视频/音频播放（MP4、MKV、WebM、MOV、AVI、M4V、MP3、WAV、FLAC）
+- 播放画面交互：单击画面播放/暂停（延迟 250ms 等双击判定）、双击切换全屏；**暂停时画面中心显示半透明圆形播放图标，点击图标或画面任意处都能继续播放**（普通与全屏一致，空状态下不显示）
 - 播放列表管理（按文件夹分组、可折叠、去重）
 - 续播记忆（进度 / 播放列表）；「自动开播」（默认关）决定载入后是否起播，「自动定位上次观看位置」（默认开）决定是否跳到上次进度
 - 播放后操作（无操作 / 自动连播 / 循环播放）；播放设置通过右侧工具组齿轮按钮弹出**浮层**（与字幕/音量/倍速同组同风格），左上角菜单「设置」仍打开完整设置弹窗，两处控件共享同一份状态
@@ -281,6 +282,7 @@ LightPlayer/
 | `togglePlaySettingsPopover(anchor)` | 工具栏齿轮按钮的播放设置浮层：开关逻辑与字幕菜单一致（`wasHidden` 先取再 `hideAllPopovers()`，再点按钮即收起）；打开前 `syncPlaySettingsUi()` 刷新控件。点击外部关闭必须走**捕获阶段**监听并放行 `#playSettingsBtn/#playPop` 内部点击（同坑 15）；`ResizeObserver` 在高度变化后按锚点重定位。 |
 | `syncPlaySettingsUi()` / `reloadPlaySettings()` | 播放设置双 UI 同步：弹层（`pop*` 前缀 id）与设置弹窗各有一套控件，改值一律走 setter（`setAfterPlay/setResumePlay/...`）落盘后由 `syncPlaySettingsUi()` 按状态刷新两处，**不读 DOM 类名**避免漂移；`reloadPlaySettings()` 在「数据管理」清空设置后把内存 `settings/hwAccelOn` 重新按默认值读回并同步，防止清空后 UI 仍显示旧值。 |
 | `buildGroups/renderPlaylist/loadFile/fileUrl` | 列表分组渲染、文件载入、`file:///` URL 构造、自动播放静音回退。 |
+| `setPlayIcon()` | 同步主工具栏 `#play` / 全屏 `#fsPlay` 图标，并按 `video.paused && activeFile` 显隐画面中心播放图标 `#centerPlay`（`onplay`/`onpause`/载入/停止均调用）。`#centerPlay` 的 `onclick` 只做 `video.play()` 并 `stopPropagation()`，避免冒泡到 `#videoWrap` 的单击切换后又立刻暂停；同时记下 `centerPlayGuardAt`，让双击的第二下（此时图标已隐藏、落点在画面上）不误触全屏。 |
 | `startAsrRun/toggleAsr/turnAsrOff` | 启动（等元数据→`startAsr`）、开关、关闭复位。 |
 | `updateAsrProgress/setStepState/setDeviceBadge/setAsrUi` | 阶段/进度/徽章/开关 UI。 |
 | `onAsrEvent` | 处理 `status/captions/caption/stopped/error/done/exit`，按 sid 过滤。 |
@@ -567,6 +569,8 @@ npx electron-builder --win zip
 18. **滚轮音量提示不能放进 `.fs-ui`**：全屏 idle 时 `.fs-ui` 整体 `opacity:0`，若把提示挂在其中，滚轮调音量会在工具栏自动隐藏后一并消失。现 `#volToast` 作为 `#videoWrap` 的独立子节点（`z-index:90`、`pointer-events:none`），普通与全屏都用同一套逻辑与样式；滚轮监听挂 `window` 且 `{passive:false}`（需 `preventDefault` 阻止页面滚动），并以 `document.hasFocus()` 保证「窗口前台聚焦才生效」，同时在侧栏 / 弹窗 / 各类浮层内放行原生滚动。
 19. **音量按钮改职责后快捷键必须改指向**：音量按钮 `#mute` 的 `onclick` 已从「静音切换」改为「弹出音量子菜单」（`toggleVolumePopover`），但快捷键动作表里 `mute` 仍写着 `run: () => $('#mute').click()`，于是按 `M` 只开关弹窗、不静音（用户反馈的「静音键无效」根因）。现抽出独立的 `toggleMute()` 供快捷键调用；**凡把某按钮的点击语义改掉，必须同步检查 `HOTKEY_ACTIONS` 中借该按钮 `click()` 实现的动作**。全屏工具栏的 `#fsMute` 同样只负责弹窗。
 20. **同一批设置的第二套控件必须状态驱动**：播放设置同时存在于工具栏弹层（`pop*` id）与设置弹窗两处，若沿用旧写法（`el.classList.toggle('on')` 就地翻转 DOM 类再各自落盘），另一处不会跟着变。现改为 setter 落盘 → `syncPlaySettingsUi()` 按状态刷新两处；另外「数据管理 → 清除播放器设置 / 清除全部」只删 localStorage，内存里的 `settings/hwAccelOn` 不会自动归位，必须调 `reloadPlaySettings()`，否则清空后 UI 仍显示旧值。
+21. **画面中心播放图标不能是 `<button>`**：按钮被点击后会获得焦点，之后按空格会同时触发原生按钮激活与全局「播放/暂停」快捷键，一次按键切换两次。现用 `div[role=button]`，并在其 `onclick` 中 `stopPropagation()`（否则冒泡到 `#videoWrap` 的单击逻辑，`play()` 之后又被 `pause()`）；显隐统一由 `setPlayIcon()` 依据 `video.paused && activeFile` 驱动，`z-index:80` 低于音量/时间提示（90/95）、高于视频与字幕，全屏下同样可见。
+22. **中心播放按钮的白色透明底在亮画面上会“消失”**：该图标样式为圆角矩形（`.center-play`，普通 74×52 / 全屏 80×56，保持约 1.42 : 1 长宽比，`border-radius:12px/14px`）+ `rgba(255,255,255,.26)` 白底 + 白色三角。实测全屏播放测试图（整片亮黄）时，`backdrop-filter` 模糊会把背景冲成淡白，仅有底色根本无法分辨按钮边界。**不做边框，轮廓只靠阴影撑住**，因此需要近远两层互补：`0 2px 6px rgba(0,0,0,.45)` 贴边形成清晰轮廓、`0 10px 26px rgba(0,0,0,.34)` 负责浮起的立体感；再加 `inset 0 0 0 1px rgba(0,0,0,.14)` 作防糊补丁。白三角另加 `drop-shadow(0 1px 2px rgba(0,0,0,.55))`，防止落到白色底上溶掉。
 
 ---
 
