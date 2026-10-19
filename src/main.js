@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, Tray, nativeImage, utilityProcess, nativeTheme, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, Tray, nativeImage, utilityProcess, nativeTheme, shell, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawnSync } = require('child_process');
@@ -14,8 +14,9 @@ if (!app.requestSingleInstanceLock()) app.quit();
 // 本地播放器场景：允许无用户手势自动播放（重启后自动续播上次视频依赖此能力）
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
-// 任务栏身份：打包版 AppUserModelID 由 electron-builder 按 appId 设置；开发模式不设置则任务栏按钮无归属。
-if (process.platform === 'win32') app.setAppUserModelId('com.lightplayer.desktop');
+// 任务栏身份：打包后由 electron-builder 按 build.appId 自动设置 AppUserModelID。
+// 开发模式刻意不设置：设置了显式 AppUserModelID 后，Windows 10+ 会把托盘气泡（displayBalloon）
+// 转成操作中心的“系统通知”；不设置时保留经典气泡，从托盘图标上方弹出（见 showTrayBalloonOnce）。
 
 let mainWindow = null;      // 主窗口（唯一）
 let appQuitting = false;    // 真正退出（托盘菜单「退出」或系统关闭）时为 true，close 事件据此区分“关闭”与“隐藏到托盘”
@@ -36,6 +37,8 @@ function writeCloseToTray(enabled) {
     fs.writeFileSync(closeToTrayMarker(), JSON.stringify({ enabled: !!enabled }));
     closeToTrayOn = !!enabled;
     if (!closeToTrayOn && tray) { tray.destroy(); tray = null; }   // 关掉后托盘图标不再驻留
+    // 关闭后再重新开启：把托盘建回来（app ready 之前 createTray 无意义，用 isReady 守卫）
+    else if (closeToTrayOn && app.isReady() && !tray) createTray();
     return true;
   } catch (_) { return false; }
 }
@@ -82,6 +85,7 @@ function createWindow() {
     if (appQuitting || !closeToTrayOn) return;
     e.preventDefault();
     win.hide();
+    showTrayBalloonOnce();   // 本次运行第一次最小化到托盘时，用气泡提示“程序未退出”
   });
   win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
   return win;
@@ -90,6 +94,67 @@ function createWindow() {
 /* ---------- 托盘（关闭到托盘 / 托盘右键菜单） ---------- */
 const APP_NAME = 'LightPlayer';
 let tray = null;
+let trayBalloonShown = false;   // 本次运行只提示一次（进程重启后自然重置）
+
+// 最小化到托盘时的气泡提示：让用户知道软件还在运行、没有退出。
+// Win10+ 已把原生托盘气泡（displayBalloon）一律转成系统 toast 条幅，无法得到“图标上方小气泡”的效果，
+// 所以自绘一个无边框置顶小窗，定位在托盘图标正上方，数秒后淡出。只显示第一次，之后保持静默。
+let balloonWin = null;
+let balloonHideTimer = null;
+function showTrayBalloonOnce() {
+  if (trayBalloonShown || !tray) return;
+  trayBalloonShown = true;
+  if (!tray.getBounds || tray.isDestroyed()) return;
+  const b = tray.getBounds();
+  if (!b || (!b.x && !b.y)) return;   // 托盘刚创建时 bounds 可能为 0，取不到就放弃提示（一次性，不影响后续使用）
+  if (balloonWin && !balloonWin.isDestroyed()) balloonWin.destroy();
+  const W = 288, H = 90, TIP = 9, MARGIN = 12, DIP = 6;
+  // 托盘通常在屏幕底部：气泡出现在图标上方；任务栏在顶部时改为下方
+  const wa = screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y + b.height / 2 }).workArea;
+  const above = b.y > wa.y + wa.height / 2;
+  // 窗体 = 卡片 + 三角小尾巴：尾巴必须对准托盘图标中心（水平方向可能被屏幕边缘截断，三角随之偏移）
+  const cx = b.x + b.width / 2;                                   // 托盘图标中心（屏幕坐标）
+  const unclampedX = cx - W / 2;                                  // 不裁边时的窗口左缘
+  const x = Math.min(Math.max(unclampedX, wa.x + MARGIN), wa.x + wa.width - W - MARGIN);
+  const tailX = Math.round(Math.min(Math.max(cx - x - TIP, MARGIN), W - MARGIN - TIP * 2));   // 三角在窗口内的左缘（指向图标）
+  const y = above ? b.y - H - DIP : b.y + b.height + DIP;
+  balloonWin = new BrowserWindow({
+    x: Math.round(x), y: Math.round(y), width: W, height: H,
+    frame: false, transparent: true, resizable: false, movable: false,
+    minimizable: false, maximizable: false, skipTaskbar: true, alwaysOnTop: true,
+    focusable: false, show: false, hasShadow: false
+    // 注意不能开 offscreen：offscreen 模式的窗口在屏幕上显示不出内容（No content under offscreen mode），
+    // 普通渲染的透明无边框窗口即可
+  });
+  balloonWin.setAlwaysOnTop(true, 'screen-saver');
+  // 三角与卡片同色同描边，旋转 45° 的方块：上半（指向卡片外）盖住卡片底边与描边，视觉上连成一体
+  const tailCss = above ? `bottom:-${TIP - 1}px` : `top:-${TIP - 1}px`;
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    body{margin:0;font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:transparent;overflow:hidden}
+    .tip{box-sizing:border-box;width:100%;height:${H - TIP}px;background:rgba(28,32,42,.96);border:1px solid rgba(255,255,255,.14);
+      border-radius:10px;padding:12px 14px;color:#e8ebf2;display:flex;gap:10px;align-items:center;position:relative}
+    .tail{position:absolute;width:${TIP * 2 - 2}px;height:${TIP * 2 - 2}px;background:rgba(28,32,42,.96);
+      border:1px solid rgba(255,255,255,.14);transform:rotate(45deg);${tailCss};
+      border-left-color:transparent;border-top-color:transparent;clip-path:polygon(100% 0,100% 100%,0 100%)}
+    .ic{flex:0 0 28px;width:28px;height:28px}
+    b{display:block;font-size:13px;margin-bottom:3px}
+    p{margin:0;font-size:12px;color:#aab2c0;line-height:1.5}
+  </style></head><body><div class="tip">
+    <svg class="ic" viewBox="0 0 24 24"><rect x="1" y="1" width="22" height="22" rx="6" fill="#1a2030"/><path d="M9.5 7.2v9.6L17.2 12z" fill="#7c5cff"/></svg>
+    <div><b>LightPlayer 仍在运行</b><p>已最小化到系统托盘，右键托盘图标可退出</p></div>
+    <div class="tail" style="left:${tailX}px"></div>
+  </div></body></html>`;
+  balloonWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+  balloonWin.once('ready-to-show', () => { balloonWin.showInactive(); });
+  clearTimeout(balloonHideTimer);
+  balloonHideTimer = setTimeout(() => {
+    if (balloonWin && !balloonWin.isDestroyed()) {
+      // 直接销毁即可（transparent+offscreen 窗口做淡出动画收益小，还可能留下残影）
+      balloonWin.destroy();
+      balloonWin = null;
+    }
+  }, 3500);
+}
 
 // 窗口从托盘 / 任务栏唤回：隐藏的只 show 不会自动成前台，必须再 focus（Windows 下最小化状态要先 restore）
 function revealMainWindow() {
@@ -126,8 +191,13 @@ function trayMenu() {
 
 function createTray() {
   if (tray || !closeToTrayOn) return;
-  // 32px PNG（由 build/icon.png 缩出的圆形图标）：Windows 托盘 16px、缩放 125%/150% 时取 20/24px，交给系统缩放
-  tray = new Tray(nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'tray.png')));
+  // Windows 托盘优先用 .ico（内含 16/24/32px 多尺寸帧，系统按 DPI 取帧，避免 PNG 单尺寸被缩放糊掉）；
+  // 其他平台回退 32px PNG。图标显示空白/发暗时先检查这里的图片是否加载成功。
+  const trayIconPath = path.join(__dirname, '..', 'build', 'tray.ico');
+  const img = process.platform === 'win32' && fs.existsSync(trayIconPath)
+    ? nativeImage.createFromPath(trayIconPath)
+    : nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'tray.png'));
+  tray = new Tray(img);
   tray.setToolTip(APP_NAME);
   tray.setContextMenu(trayMenu());
   // 左键单击 / 双击直接唤回窗口；右键菜单由 Windows 自动弹出，不用自己处理

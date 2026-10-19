@@ -30,6 +30,8 @@
       "src/**/*",
       "build/icon.ico",
       "build/icon.png",
+      "build/tray.ico",
+      "build/tray.png",
       "package.json"
     ],
     "asarUnpack": [

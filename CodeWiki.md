@@ -598,6 +598,8 @@ npx electron-builder --win zip
 24. **关闭到托盘的状态不能只存 localStorage**：窗口 `close` 事件在主进程执行，主进程读不到渲染端 localStorage。沿用硬件加速那套 marker 文件（`userData/close-to-tray.json`），并在两处都对“无 marker = 默认 true”做兜底；渲染端启动后用 `getCloseToTray()` 以 marker 为准校正 UI，避免两边显示不一致。
 25. **托盘与 ASR worker 生命周期**：「关闭到托盘」开启时 `window:close` 只隐藏窗口，**不能**顺手 `shutdownAsrDaemon()`，否则从托盘恢复后实时字幕要从零冷启动；真正退出统一由 `before-quit` 清理。反过来，开关被关闭时要 `tray.destroy()` 并置 `null`，否则托盘图标会变成“点了没反应”的僵尸图标。
 26. **`window-all-closed` 里不能改成“仅 `appQuitting` 才退”**：关闭被拦截时窗口从未真正销毁，该事件根本不会触发，贸然加条件反而让“关闭到托盘已关闭 → 点 ×”退不出去。维持原逻辑 `if (process.platform !== 'darwin') app.quit()`，退出与否完全由 `close` 拦截决定。
+27. **托盘销毁后必须能重建**：`writeCloseToTray(false)` 会 `tray.destroy()`，若重新开启时只写 marker 不调 `createTray()`，托盘图标会消失到重启。重建要加 `app.isReady()` 与 `!tray` 守卫（ready 前建托盘无意义，重复调用会建出两个）。
+28. **被事件过滤器“吃掉”的清理必须自己做**：`stopPlayback()` 置 `asrSid=0` 后，旧会话回发的 `stopped` 事件会被 `data.sid !== asrSid` 过滤器丢弃，挂在该事件上的 `stopStageTimer()` 永远不会执行——`asrStageTimer`（1s interval）会持续空写已隐藏的 `#asrElapsed` 直到下次开启字幕。凡“先改过滤键、再等旧事件回调清理”的模式都要在改动点主动清理。
 
 ---
 

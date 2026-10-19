@@ -609,6 +609,7 @@ function stopPlayback() {
   if ($('#asrSwitch').classList.contains('on')) window.lightPlayer.stopAsr();
   asrSid = 0;
   window.asrLastError = false;
+  stopStageTimer();   // 旧会话的 'stopped' 事件已被 asrSid=0 过滤器丢弃，必须在这里主动清掉阶段计时器，否则每秒空写一次已隐藏的 #asrElapsed
   $('#asrProgress').classList.add('hidden');
   STAGES.forEach(id => setStepState('step-' + id, 'pending'));
   $('#asrStageLabel').textContent = '准备中'; $('#asrPercent').textContent = '0%'; $('#asrBar').style.width = '0%'; $('#asrMessage').textContent = '';
