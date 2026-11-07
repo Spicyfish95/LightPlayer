@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawnSync } = require('child_process');
 const { resolveModelDir } = require('./asr/models');
+const { MEDIA_EXTENSIONS, mediaPathsFromArgv, normalizeMediaPath } = require('./launch-args');
 let asrProcess = null;   // 常驻 ASR worker（sherpa-onnx，模型只加载一次，会话经消息控制）
 let asrNextSid = 1;      // 会话自增 id（渲染端据此过滤旧会话残留事件）
 const asrSidWaiters = new Map();   // sid → resolve()，等待某会话停止/结束
@@ -21,6 +22,34 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 let mainWindow = null;      // 主窗口（唯一）
 let appQuitting = false;    // 真正退出（托盘菜单「退出」或系统关闭）时为 true，close 事件据此区分“关闭”与“隐藏到托盘”
 let closeToTrayOn = true;   // 关闭到托盘开关（渲染端写 userData/close-to-tray.json，主进程据此决定关闭按钮的行为）
+
+/* ---------- 启动参数 / 外部打开（命令行、「打开方式」、拖到 exe、快捷方式参数） ----------
+   启动时的路径先存在 pendingLaunchFiles，等页面加载完（did-finish-load）再推给渲染端；
+   软件已在运行时由 second-instance 的 argv 转发（macOS 走 open-file）。
+   渲染端收到后会在「会话恢复完成」之后才载入并强制起播，避免被“恢复上次视频”覆盖。 */
+let pendingLaunchFiles = mediaPathsFromArgv(process.argv, {
+  packaged: app.isPackaged,
+  defaultApp: process.defaultApp,
+  baseDir: process.cwd()
+});
+let rendererReady = false;   // 页面是否已加载完；reload 期间短暂置 false，事件先排队
+function flushLaunchFiles() {
+  if (!rendererReady || !mainWindow || mainWindow.isDestroyed() || !pendingLaunchFiles.length) return;
+  const files = pendingLaunchFiles;
+  pendingLaunchFiles = [];
+  mainWindow.webContents.send('launch:open', files);
+}
+function queueLaunchFiles(files) {
+  if (!Array.isArray(files) || !files.length) return;
+  pendingLaunchFiles = [...new Set([...pendingLaunchFiles, ...files])];
+  flushLaunchFiles();
+}
+// macOS：Finder 里双击 / 拖到 Dock 时不会走 argv，而是触发 open-file（必须在 ready 前注册）
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  const p = normalizeMediaPath(filePath, process.cwd());
+  if (p) queueLaunchFiles([p]);
+});
 
 // 关闭到托盘：与硬件加速开关同一套路（marker 文件），因为窗口的关闭行为在主进程，读不到渲染端 localStorage。
 // enabled 省略时仅读取；默认开启。
@@ -78,6 +107,9 @@ function killProcessTree(proc) {
 function createWindow() {
   const win = new BrowserWindow({ width: 1440, height: 900, minWidth: 1080, minHeight: 680, backgroundColor: '#080b12', frame: false, icon: path.join(__dirname, '..', 'build', 'icon.ico'), webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
   // win.webContents.openDevTools();
+  // 启动参数里的视频要等页面可接收 IPC 后再发；reload（开发热更新）期间先排队，加载完补发
+  win.webContents.on('did-start-loading', () => { rendererReady = false; });
+  win.webContents.on('did-finish-load', () => { rendererReady = true; flushLaunchFiles(); });
   win.loadFile(path.join(__dirname, 'index.html'));
   // 关闭到托盘：点标题栏 ×（或 Alt+F4）不退出、不弹通知，只隐藏窗口，应用与播放状态都留在后台。
   // 只有 appQuitting（托盘菜单「退出」/ 系统关机）时才真正关闭，避免托盘菜单的「退出」也被拦成隐藏。
@@ -206,6 +238,7 @@ function createTray() {
 }
 
 app.whenReady().then(() => {
+  const VIDEO_FILTER_EXTS = MEDIA_EXTENSIONS.map(e => e.slice(1));   // 对话框 filters 不带点
   // 硬件加速设置持久化（marker 文件 + localStorage 双写，保证主进程下次启动能读到）
   ipcMain.handle('settings:hw-accel', (event, enabled) => {
     try {
@@ -233,13 +266,13 @@ app.whenReady().then(() => {
     } catch (_) { return false; }
   });
   ipcMain.handle('dialog:open-video', async () => {
-    const result = await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'], filters: [{ name: '视频文件', extensions: ['mp4','mkv','webm','mov','avi','m4v','mp3','wav','flac'] }] });
+    const result = await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'], filters: [{ name: '视频文件', extensions: VIDEO_FILTER_EXTS }] });
     return result.canceled ? [] : result.filePaths;
   });
   ipcMain.handle('dialog:open-video-folder', async () => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
     if (result.canceled || !result.filePaths[0]) return [];
-    const extensions = new Set(['.mp4','.mkv','.webm','.mov','.avi','.m4v','.mp3','.wav','.flac']);
+    const extensions = new Set(MEDIA_EXTENSIONS);
     const files = [];
     const walk = dir => {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -453,8 +486,16 @@ app.whenReady().then(() => {
   createTray();   // 关闭到托盘开启时驻留托盘；单实例再次启动由托盘 / revealMainWindow 唤回同一个窗口
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow(); });
 
-  // 第二个实例被唤醒：这是用户又点了一次快捷方式 / exe，把已打开的窗口还原并顶到最前，不新开进程
-  app.on('second-instance', () => revealMainWindow());
+  // 第二个实例被唤醒：这是用户又点了一次快捷方式 / exe，或对另一个视频选了「打开方式」。
+  // 把已打开的窗口还原并顶到最前，不新开进程；argv 里的视频经 launch:open 转给渲染端直接播放。
+  app.on('second-instance', (event, argv, workingDirectory) => {
+    revealMainWindow();
+    queueLaunchFiles(mediaPathsFromArgv(argv, {
+      packaged: app.isPackaged,
+      defaultApp: process.defaultApp,
+      baseDir: workingDirectory || process.cwd()   // 相对路径按第二个进程的工作目录解析
+    }));
+  });
 });
 // 关闭到托盘时窗口全部隐藏并不等于退出：只有 appQuitting 才真正退出（托盘「退出」或系统关机）。
 // 注意 close-window 被拦截时窗口从未真正销毁，window-all-closed 不会触发，这里只是退出路径的最后一道闸。

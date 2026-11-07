@@ -27,5 +27,7 @@ contextBridge.exposeInMainWorld('lightPlayer', {
   setThemeMode: mode => ipcRenderer.send('theme:mode', mode),
   onSystemThemeChange: callback => ipcRenderer.on('theme:system-changed', (_, data) => callback(!!(data && data.dark))),
   // 托盘菜单动作：'open-video' / 'close-video'（主进程菜单项触发）
-  onTrayAction: callback => ipcRenderer.on('tray:action', (_, action) => callback(String(action || '')))
+  onTrayAction: callback => ipcRenderer.on('tray:action', (_, action) => callback(String(action || ''))),
+  // 启动参数 / 外部打开（命令行、「打开方式」、拖到 exe）：回调收到媒体文件路径数组
+  onLaunchOpen: callback => ipcRenderer.on('launch:open', (_, files) => callback(Array.isArray(files) ? files : []))
 });

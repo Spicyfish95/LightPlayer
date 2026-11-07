@@ -703,6 +703,7 @@ function loadFile(file, opts = {}) {
     showResumeToast(resume.t);
   };
   video.addEventListener('loadedmetadata', () => {
+    if (activeFile !== file) return;   // 快速连续切换/外部打开时，旧载入的监听不得作用到新视频上
     resumeAt();
     if (!autoPlay) return;
     video.play().then(() => {}).catch(() => {
@@ -733,6 +734,37 @@ function loadFile(file, opts = {}) {
 }
 async function openFiles() { const files = await window.lightPlayer.openVideo(); if (files?.length) { playlist = [...new Set([...playlist, ...files])]; loadFile(files[0]); renderPlaylist(); savePlaylistState(); } }
 async function openFolder() { const files = await window.lightPlayer.openVideoFolder(); if (files?.length) { playlist = [...new Set([...playlist, ...files])]; loadFile(files[0]); renderPlaylist(); savePlaylistState(); } else { $('#fileMeta').textContent = '该文件夹内未找到支持的视频'; } }
+
+/* ---------- 启动参数 / 外部打开（命令行、「打开方式」、拖到 exe、快捷方式参数） ----------
+   主进程把 argv 里的视频经 launch:open 推来；外部打开一律直接播放，不受“自动开播”开关影响。
+   会话恢复是异步的：先排队，等恢复完成后统一载入，避免刚播上的外部视频被“恢复上次视频”顶掉。 */
+let launchQueue = [];          // 会话恢复完成前收到的外部打开请求
+let sessionRestored = false;   // 会话恢复（含失败）是否已完成
+function openFromLaunch(files) {
+  const list = [...new Set((Array.isArray(files) ? files : []).filter(f => typeof f === 'string' && f))];
+  if (!list.length) return;
+  playlist = [...new Set([...playlist, ...list])];
+  if (list[0] === activeFile) {          // 正在播的就是这个文件（例如播放中又双击它）：继续播，不重新载入打断
+    if (video.paused) video.play().catch(() => {});
+    renderPlaylist(); savePlaylistState();
+    return;
+  }
+  loadFile(list[0], { autoPlay: true });  // 直接播放：显式覆盖“自动开播”开关
+}
+function onLaunchFiles(files) {
+  const list = (Array.isArray(files) ? files : []).filter(f => typeof f === 'string' && f);
+  if (!list.length) return;
+  if (!sessionRestored) { launchQueue.push(...list); return; }
+  openFromLaunch(list);
+}
+function markSessionRestored() {
+  sessionRestored = true;
+  if (!launchQueue.length) return;
+  const files = launchQueue;
+  launchQueue = [];
+  openFromLaunch(files);
+}
+window.lightPlayer.onLaunchOpen(onLaunchFiles);
 
 /* ---------- 播放控制 ---------- */
 // 暂停时画面中心显示半透明播放图标（空状态/未载入视频时不显示）；普通与全屏共用同一个节点
@@ -1175,11 +1207,13 @@ $('#hotkeys').onclick = () => { hotkeysOn = $('#hotkeys').classList.toggle('on')
       // localStorage 快速关闭时可能丢失：优先读主进程同步落盘的会话文件，回退 localStorage
       window.lightPlayer.loadSession()
         .then(s => resumeFromSaved(s && s.kind === 'playlist' && s.data ? s.data : store.get('playlist', null)))
-        .catch(() => resumeFromSaved(store.get('playlist', null)));
+        .catch(() => resumeFromSaved(store.get('playlist', null)))
+        .finally(markSessionRestored);   // 恢复结束（含失败）后再放行启动参数指定的视频
     } else {
       window.__resumeDebug = 'keep-playlist-off';
+      markSessionRestored();
     }
-  } catch (err) { console.error('会话基础恢复失败', err); }
+  } catch (err) { console.error('会话基础恢复失败', err); markSessionRestored(); }
 })();
 
 video.ontimeupdate = () => {

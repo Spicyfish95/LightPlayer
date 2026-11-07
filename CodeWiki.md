@@ -49,6 +49,7 @@ LightPlayer 是一个基于 **Electron** 的桌面端本地视频/音频播放�
 - 本地视频/音频播放（MP4、MKV、WebM、MOV、AVI、M4V、MP3、WAV、FLAC）
 - **关闭到托盘**（设置 → 通用，默认开启）：点标题栏 × 只最小化到系统托盘，播放状态保留；托盘右键菜单「显示LightPlayer / 打开视频… / 关闭视频 / 退出LightPlayer」，左键单击托盘图标唤回窗口
 - **单实例**：软件已打开时再次点击快捷方式/exe，不新开进程，直接把已打开窗口还原并置顶
+- **启动参数 / 外部打开**：`LightPlayer.exe "D:\a.mp4"`、资源管理器「打开方式」、把视频拖到 exe 图标、快捷方式附加参数都能直接播放（不受「自动开播」开关限制）；软件已在运行时经 `second-instance` 转给现有窗口，播放列表按去重追加
 - 播放画面交互：单击画面播放/暂停（延迟 250ms 等双击判定）、双击切换全屏；**暂停时画面中心显示半透明圆角矩形播放图标（白底 + 白三角），点击图标或画面任意处都能继续播放**（普通与全屏一致，空状态下不显示）
 - 播放列表管理（按文件夹分组、可折叠、去重）
 - 续播记忆（进度 / 播放列表）；「自动开播」（默认关）决定载入后是否起播，「自动定位上次观看位置」（默认开）决定是否跳到上次进度
@@ -170,7 +171,8 @@ LightPlayer/
 │   ├── tray.png            # 系统托盘图标（32px 圆形，由 icon.png 生成）
 │   └── after-build.js      # electron-builder 收尾钩子：构建后删除中间产物
 └── src/
-    ├── main.js             # 主进程（286 行）：窗口/对话框/IPC/ASR worker 管理
+    ├── main.js             # 主进程（286 行）：窗口/对话框/IPC/ASR worker/启动参数转发
+    ├── launch-args.js      # 启动参数解析：argv / file:// URL → 可播放文件绝对路径（纯 Node）
     ├── preload.js          # 预加载（22 行）：contextBridge API
     ├── app.js              # 渲染进程（1373 行）：UI/播放/字幕/持久化
     ├── index.html          # 页面骨架（CSP + #app）
@@ -194,10 +196,13 @@ LightPlayer/
 4. **系统对话框**：打开视频、打开文件夹（递归扫描扩展名并自然序排序）、打开字幕、SRT 保存。
 5. **文件系统能力**：`session.json` 落盘、硬件加速与关闭到托盘 marker、字幕缓存读取/清除（清除前先优雅停止识别会话）、SRT 导出（UTF-8 BOM）。
 6. **ASR worker 管理**：`utilityProcess.fork` 常驻 worker；转发 worker 消息为 `asr:event`；管理会话 id、等待会话结束、退出时清理。
+7. **启动参数 / 外部打开**：`mediaPathsFromArgv()` 从 argv 提取媒体文件（冷启动与 `second-instance` 同一套解析），`pendingLaunchFiles` 暂存到页面加载完成，再经 `launch:open` 推给渲染端；macOS 另接 `open-file`。
 
 关键设计：
 
-- **单实例**：`app.requestSingleInstanceLock()` 在文件顶部执行；第二个进程立即退出，第一个进程在 `second-instance` 里调 `revealMainWindow()`（还原最小化 → show → focus），因此不会新开窗口。
+- **单实例**：`app.requestSingleInstanceLock()` 在文件顶部执行；第二个进程立即退出，第一个进程在 `second-instance` 里先 `revealMainWindow()`（还原最小化 → show → focus），再把 argv 里的视频转给渲染端，因此不会新开窗口。
+- **启动参数解析**（`src/launch-args.js`）：跳过 `argv[0]`（打包后是 exe）与开发模式的 `argv[1]`（应用目录，`process.defaultApp` 为真时）；忽略 `--xxx` / `-psn_xxx` 之类开关；支持 `file://` URL（解码并统一成 Windows 反斜杠）；相对路径按调用方工作目录（`second-instance` 用其 `workingDirectory`）解析；只保留真实存在且扩展名在 `MEDIA_EXTENSIONS` 内的文件。该模块不依赖 Electron，可直接用 Node 测试。
+- **发送时机**：`did-finish-load` 时才置 `rendererReady = true` 并 `flushLaunchFiles()`；开发热更新 `reload` 会先触发 `did-start-loading` 把 `rendererReady` 置回 false，事件先排队，避免发到正在销毁的页面而丢包。
 - **关闭到托盘**：`mainWindow.on('close')` 中若 `!appQuitting && closeToTrayOn` 则 `e.preventDefault()` + `win.hide()`，保持静默（不弹系统通知、不弹托盘气泡，用户明确要求无打扰）。`appQuitting` 只由托盘「退出」`{ appQuitting = true; app.quit(); }` 和 `before-quit` 置位。状态存 `userData/close-to-tray.json`（与 `hw-accel.json` 同一套 marker 机制，因为读 localStorage 的主进程拿不到渲染端设置），不带参数调用 `settings:close-to-tray` 即读取。
 - **托盘生命周期**：`createTray()` 仅在 `closeToTrayOn` 为真时创建；开关关闭时 `tray.destroy()` 并置 `null`，不再驻留。
 - `resolveAsrWorker()`：开发模式返回 `src/asr/asr_worker.js`；打包模式返回 `app.asar.unpacked/src/asr/asr_worker.js`（worker 与原生模块都在 asarUnpack 中）。
@@ -212,7 +217,7 @@ LightPlayer/
 
 - `invoke`：`openVideo`、`openVideoFolder`、`openSubtitle`、`readCaptionCache`、`clearCaptionCache`、`clearAllCaptionCaches`、`exportSrt`、`setHwAccel`、`getHwAccel`、`setCloseToTray`、`getCloseToTray`、`saveSession`、`loadSession`、`startAsr`。
 - `send`：`stopAsr`、`seekAsr`、`minimize`、`maximize`、`close`。
-- 事件订阅：`onAsrEvent(callback)`、`onTrayAction(callback)`（收到 `'open-video'` / `'close-video'`）。
+- 事件订阅：`onAsrEvent(callback)`、`onTrayAction(callback)`（收到 `'open-video'` / `'close-video'`）、`onLaunchOpen(callback)`（收到启动参数 / 外部打开的媒体路径数组）。
 - 工具：`pathForFile(file)`（`webUtils.getPathForFile`，回退 `file.path`）。
 
 > 已移除的旧 API：`openModelDirectory`、`startGpuSetup`、`cancelGpuSetup`、`onGpuSetupEvent`。
@@ -228,6 +233,7 @@ LightPlayer/
 - **实时字幕阶段 UI**：三阶段步骤条（**准备识别模型 → 分析视频音频 → 实时转写**）+ 进度条 + 引擎徽章（固定显示“SenseVoice · CPU”）。
 - **数据管理 / 快捷键 / 弹窗 / 自绘窗口按钮**。
 - **托盘动作**：`window.lightPlayer.onTrayAction(action => …)` —— `'open-video'` 调 `openFiles()`，`'close-video'` 先 `saveProgress()`/`savePlaylistState()` 再 `stopPlayback()`（等同「关闭视频」回到空状态）。
+- **启动参数 / 外部打开**：`onLaunchOpen(files)` → `onLaunchFiles()` 去重后入 `launchQueue`；会话恢复（异步）结束时 `markSessionRestored()` 统一放行，`openFromLaunch()` 用 `loadFile(file, { autoPlay: true })` 强制起播。外部打开的同一文件已在播时不重新载入，只确保继续播放。
 
 设置弹窗分两栏：**通用**（`#closeToTray`，默认开启）在最前，其后是**播放设置**。关闭到托盘走 `setCloseToTray()`：写 localStorage + `setCloseToTray` IPC 即时通知主进程，启动时再以主进程返回值（marker 为准）校正 UI。
 
@@ -271,6 +277,8 @@ LightPlayer/
 | `readCloseToTray()` / `writeCloseToTray(enabled)` | 读写 `userData/close-to-tray.json`（默认开启）。写入时同步 `closeToTrayOn`；关闭时销毁托盘。 |
 | `createWindow()` | 创建无边框窗口；`close` 事件在 `!appQuitting && closeToTrayOn` 时 `preventDefault()` + `hide()`（保持静默，不弹通知）；`closed` 时清空 `mainWindow`。 |
 | `revealMainWindow()` | 从托盘 / 二次启动唤回：`restore()` → `show()` → `focus()`；窗口已销毁则新建。 |
+| `mediaPathsFromArgv(argv, opts)` | 启动参数解析（`launch-args.js`，无 Electron 依赖）：跳过 exe/应用目录与开关参数，支持 `file://`、相对路径，只返回真实存在的媒体文件。 |
+| `queueLaunchFiles(files)` / `flushLaunchFiles()` | 暂存启动参数视频，等 `rendererReady` 后经 `launch:open` 发给渲染端；同一批去重。 |
 | `createTray()` / `trayMenu()` / `sendToRenderer(action)` | 托盘图标与右键菜单（显示LightPlayer / 打开视频… / 关闭视频 / 退出LightPlayer）；菜单动作转 `tray:action` 发给渲染端。隐藏到托盘保持静默，不弹通知。 |
 | `resolveAsrWorker()` | 返回 worker 路径（开发源码 / 打包后的 app.asar.unpacked）。 |
 | `killProcessTree(proc)` | Windows 下 `taskkill /F /T` 结束进程树（带走 ffmpeg 孙进程）。 |
@@ -296,6 +304,7 @@ LightPlayer/
 | `togglePlaySettingsPopover(anchor)` | 工具栏齿轮按钮的播放设置浮层：开关逻辑与字幕菜单一致（`wasHidden` 先取再 `hideAllPopovers()`，再点按钮即收起）；打开前 `syncPlaySettingsUi()` 刷新控件。点击外部关闭必须走**捕获阶段**监听并放行 `#playSettingsBtn/#playPop` 内部点击（同坑 15）；`ResizeObserver` 在高度变化后按锚点重定位。 |
 | `syncPlaySettingsUi()` / `reloadPlaySettings()` | 播放设置双 UI 同步：弹层（`pop*` 前缀 id）与设置弹窗各有一套控件，改值一律走 setter（`setAfterPlay/setResumePlay/...`）落盘后由 `syncPlaySettingsUi()` 按状态刷新两处，**不读 DOM 类名**避免漂移；`reloadPlaySettings()` 在「数据管理」清空设置后把内存 `settings/hwAccelOn` 重新按默认值读回并同步，防止清空后 UI 仍显示旧值。 |
 | `buildGroups/renderPlaylist/loadFile/fileUrl` | 列表分组渲染、文件载入、`file:///` URL 构造、自动播放静音回退。 |
+| `onLaunchFiles/openFromLaunch/markSessionRestored` | 启动参数 / 外部打开：会话恢复前排队，`markSessionRestored()` 后 `loadFile(..., {autoPlay:true})` 强制起播；同一文件已载入时只继续播放。 |
 | `setPlayIcon()` | 同步主工具栏 `#play` / 全屏 `#fsPlay` 图标，并按 `video.paused && activeFile` 显隐画面中心播放图标 `#centerPlay`（`onplay`/`onpause`/载入/停止均调用）。`#centerPlay` 的 `onclick` 只做 `video.play()` 并 `stopPropagation()`，避免冒泡到 `#videoWrap` 的单击切换后又立刻暂停；同时记下 `centerPlayGuardAt`，让双击的第二下（此时图标已隐藏、落点在画面上）不误触全屏。 |
 | `setCloseToTray(on)` / `syncCloseToTrayUi()` | 通用设置「关闭到托盘」：写 localStorage + `setCloseToTray` IPC（主进程即时生效），启动时 `getCloseToTray()` 以 marker 校正 UI。 |
 | `startAsrRun/toggleAsr/turnAsrOff` | 启动（等元数据→`startAsr`）、开关、关闭复位。 |
@@ -352,6 +361,7 @@ LightPlayer/
 | `window:minimize/maximize/close` | send | 窗口控制（关闭到托盘开启时 `window:close` 只隐藏窗口且不销毁 ASR worker） |
 | `asr:event` | send（M→R） | worker 事件转发 |
 | `tray:action` | send（M→R） | 托盘菜单动作，载荷为 `'open-video'` / `'close-video'` |
+| `launch:open` | send（M→R） | 启动参数 / 外部打开的媒体文件绝对路径数组；渲染端在会话恢复完成后载入并直接播放 |
 
 ### 7.2 主进程 ↔ ASR Worker（utilityProcess MessagePort）
 
@@ -466,15 +476,17 @@ PATH 中找不到 ffmpeg 时按序下载 zip：① `www.gyan.dev` release-essent
 
 ### 10.1 启动与会话恢复
 
-抢单实例锁（失败即退出）→ 读硬件加速 marker（决定是否 `disableHardwareAcceleration`）→（Windows）设 AppUserModelID → ready 后注册全部 IPC → 建窗 → 按 `close-to-tray.json` 创建托盘 → 恢复音量/倍速 →（记住列表时）优先读 `session.json` 回退 localStorage，恢复列表与上次视频并按开关自动续播。
+抢单实例锁（失败即退出）→ 解析启动参数（`mediaPathsFromArgv`，结果存 `pendingLaunchFiles`）→ 读硬件加速 marker（决定是否 `disableHardwareAcceleration`）→（Windows）设 AppUserModelID → ready 后注册全部 IPC → 建窗 → 按 `close-to-tray.json` 创建托盘 → 恢复音量/倍速 →（记住列表时）优先读 `session.json` 回退 localStorage，恢复列表与上次视频并按开关自动续播 → 页面 `did-finish-load` 后若存在启动参数则发 `launch:open`，渲染端等恢复完成再载入并直接播放（覆盖“恢复上次视频”）。
 
-**再次启动**：第二个进程拿不到锁立即 `app.quit()`；第一个进程收到 `second-instance` 后 `revealMainWindow()`，窗口从隐藏/最小化回到最前。
+**再次启动**：第二个进程拿不到锁立即 `app.quit()`；第一个进程收到 `second-instance` 后先 `revealMainWindow()`（窗口从隐藏/最小化回到最前），再从第二个进程的 argv 解析视频并 `queueLaunchFiles()`，由渲染端直接播放。
 
 **关闭**：设置里「关闭到托盘」开启（默认）时标题栏 × 与 Alt+F4 都只隐藏窗口、进程与播放状态保留，托盘图标常驻；托盘菜单「退出LightPlayer」置 `appQuitting = true` 后才真正关闭。关闭到托盘关闭时 × 直接退出进程。
 
 ### 10.2 打开/切换视频
 
 对话框/拖放得到路径去重入列表 → `loadFile` 停止在跑识别并重置 ASR UI → 设置 `video.src` → `loadedmetadata` 由「自动定位上次观看位置」决定是否跳到上次进度、由「自动开播」决定是否起播（默认关闭；被浏览器策略拦截则静音启动再恢复音量）→ 仅当「是否使用缓存」开启时读字幕缓存显示 → 若字幕开关偏好开启则自动启动识别（并透传 `cache` 开关：渲染端→preload→主进程 `asr:start`→worker start 消息；主进程构造 worker 消息时必须显式带上 `cache: options.cache !== false`，否则 worker 收到 `undefined` 会按开启处理，这正是开关关闭仍生成缓存文件的历史根因）。
+
+**外部打开**（命令行 /「打开方式」/拖到 exe）：主进程解析 argv → `launch:open` → 渲染端排队到会话恢复完成 → `openFromLaunch()` 调 `loadFile(file, { autoPlay: true })` 强制起播（不受「自动开播」开关限制），并去重追加到播放列表；`play()` 若被自动播放策略拦截，沿用静音起播回退。
 
 ### 10.3 实时字幕流水线
 
@@ -600,7 +612,9 @@ npx electron-builder --win zip
 26. **`window-all-closed` 里不能改成“仅 `appQuitting` 才退”**：关闭被拦截时窗口从未真正销毁，该事件根本不会触发，贸然加条件反而让“关闭到托盘已关闭 → 点 ×”退不出去。维持原逻辑 `if (process.platform !== 'darwin') app.quit()`，退出与否完全由 `close` 拦截决定。
 27. **托盘销毁后必须能重建**：`writeCloseToTray(false)` 会 `tray.destroy()`，若重新开启时只写 marker 不调 `createTray()`，托盘图标会消失到重启。重建要加 `app.isReady()` 与 `!tray` 守卫（ready 前建托盘无意义，重复调用会建出两个）。
 28. **被事件过滤器“吃掉”的清理必须自己做**：`stopPlayback()` 置 `asrSid=0` 后，旧会话回发的 `stopped` 事件会被 `data.sid !== asrSid` 过滤器丢弃，挂在该事件上的 `stopStageTimer()` 永远不会执行——`asrStageTimer`（1s interval）会持续空写已隐藏的 `#asrElapsed` 直到下次开启字幕。凡“先改过滤键、再等旧事件回调清理”的模式都要在改动点主动清理。
+29. **启动参数不能直接当文件路径用**：`process.argv` 混有 exe / 应用目录与 Chromium 开关（如 `--original-process-start-time`）；开发模式（`electron .`）的 `argv[1]` 是应用目录。必须按 `app.isPackaged` / `process.defaultApp` 跳过后缀，过滤 `-` 开头的开关，再校验文件存在与扩展名；`file://` 路径要解码并把 `/` 统一成 `\`，否则同一视频会以两种路径写法进入列表，去重失效。
+30. **启动参数与「恢复上次视频」存在竞态**：`loadSession()` 是异步的，若收到 `launch:open` 就直接 `loadFile`，会被随后完成的会话恢复覆盖。渲染端恢复完成前先入 `launchQueue`，`.finally(markSessionRestored)`（失败也执行）后再载入；主进程则要等 `did-finish-load` 才发（reload 时 `did-start-loading` 先把 `rendererReady` 置 false），否则 IPC 会发到尚未就绪/正在销毁的页面而丢包。另外 `loadFile` 的 `loadedmetadata` 回调必须校验 `activeFile === file`：快速连续载入时旧监听会作用到新视频上，把它 seek 到上一个视频的续播进度。
 
 ---
 
-*本文档基于仓库当前源码（LightPlayer v1.0.0，sherpa-onnx 架构）整理；源码变更时请同步更新对应章节。*
+*本文档基于仓库当前源码（LightPlayer v1.1.0，sherpa-onnx 架构）整理；源码变更时请同步更新对应章节。*
